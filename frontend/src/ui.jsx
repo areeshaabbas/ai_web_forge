@@ -19,16 +19,19 @@ export function initialSlot(urgency='Today') {
   return {start:toPK(start),end:toPK(+start+3600000)};
 }
 export function slotBody(start,end) {
-  if (!start || !end || end<=start) throw new Error('Choose a start and an end time in order.');
+  if (!start || !end || end<=start || !Number.isFinite(Date.parse(start+'+05:00')) || !Number.isFinite(Date.parse(end+'+05:00'))) throw new Error('Choose a start and an end time in order.');
+  if(Date.parse(end+'+05:00')-Date.parse(start+'+05:00')>86400000) throw new Error('Choose a job slot of at most 24 hours.');
   return {startsAt:fromPK(start),endsAt:fromPK(end)};
 }
 export function query(values) {
   return new URLSearchParams(Object.entries(values).filter(([,v])=>v!=='' && v!=null)).toString();
 }
-export function makeApi(userId) {
+// A signed-in account sends its Bearer token; otherwise the seeded demo accounts are selected with x-demo-user.
+export const authHeaders = (userId,token) => token ? {Authorization:'Bearer '+token} : {'x-demo-user':String(userId)};
+export function makeApi(userId,token) {
   return async (path,method='GET',body) => {
-    const response=await fetch('/api'+path,{method,headers:{'x-demo-user':String(userId),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
-    const data=await response.json();
+    const response=await fetch('/api'+path,{method,headers:{...authHeaders(userId,token),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
+    const data=await response.json().catch(()=>({}));
     if (!response.ok) throw Object.assign(new Error(data.error || 'Request failed.'),{status:response.status});
     return data;
   };
@@ -47,7 +50,9 @@ export function useTask() {
   }
   return {pending,error,run,setError};
 }
-export function ErrorNote({error}) { return error ? <p className="error" role="alert">{error}</p> : null; }
+// Server validation errors look like "card.number — That card number is not valid."; show just the sentence.
+const friendly = text => String(text).replace(/(^|; )[\w.]+ — /g,'$1');
+export function ErrorNote({error,plain=false}) { return error ? <p className="error" role="alert">{plain?friendly(error):error}</p> : null; }
 export function Intro({eyebrow,title,description,icon:Icon}) {
   return <div className="page-intro"><div className="eyebrow">{Icon&&<Icon size={16}/>} {eyebrow}</div><h1>{title}</h1><p>{description}</p></div>;
 }
@@ -65,17 +70,45 @@ export function TradeTiles({value,onChange}) {
     return <button type="button" className={'tile '+(trade===value?'selected':'')} aria-pressed={trade===value} key={trade} onClick={()=>onChange(trade)}><Icon size={20}/><span>{lang==='ur'?tradeUrdu[trade]:trade}</span></button>;
   })}</div>;
 }
+// Voices load asynchronously in most browsers, so wait briefly for them instead of giving up on the first click.
+function loadVoices() {
+  const speech=window.speechSynthesis;
+  const now=speech.getVoices();
+  if (now.length) return Promise.resolve(now);
+  return new Promise(resolve=>{
+    const done=()=>{speech.removeEventListener('voiceschanged',done);resolve(speech.getVoices());};
+    speech.addEventListener('voiceschanged',done);
+    setTimeout(done,1500);
+  });
+}
+// Optional, tap-to-play speech. Nothing is spoken until the button is pressed; pressing again stops it.
 export function Listen({text,language='ur-PK',label='Listen'}) {
   const [notice,setNotice]=useState('');
-  return <span><button type="button" className="btn quiet mini" onClick={()=>{
+  const [speaking,setSpeaking]=useState(false);
+  const mine=useRef(false);
+  useEffect(()=>()=>{if(mine.current)window.speechSynthesis?.cancel();},[]);
+  if (!window.speechSynthesis) return null;
+  async function toggle() {
     const speech=window.speechSynthesis;
-    const voice=speech?.getVoices().find(v=>v.lang.toLowerCase().startsWith(language.slice(0,2)));
-    if (!voice) {setNotice('This device has no matching speech voice.');return;}
+    if (speaking) {speech.cancel();return;}
+    const voices=await loadVoices();
+    const voice=voices.find(v=>v.lang.toLowerCase().replace('_','-').startsWith(language.slice(0,2).toLowerCase()));
+    if (!voice) {setNotice('No Urdu voice found on this device. Try Microsoft Edge or Chrome, or add an Urdu voice in your system speech settings.');return;}
     setNotice('');
     speech.cancel();
     const message=new SpeechSynthesisUtterance(text);
-    message.voice=voice; message.lang=language; speech.speak(message);
-  }}><Volume2 size={17}/> {label}</button>{notice&&<small className="voice-note" role="status">{notice}</small>}</span>;
+    message.voice=voice;message.lang=voice.lang||language;message.rate=0.9;
+    message.onstart=()=>{mine.current=true;setSpeaking(true);};
+    const finish=()=>{mine.current=false;setSpeaking(false);};
+    message.onend=finish;message.onerror=finish;
+    speech.speak(message);
+  }
+  return <span className="speak"><button type="button" className="btn quiet mini" aria-pressed={speaking} onClick={toggle}>{speaking?<Square size={15}/>:<Volume2 size={17}/>} {speaking?'روکیں':label}</button>{notice&&<small className="voice-note" role="status">{notice}</small>}</span>;
+}
+// Urdu explanation for workers only. Customers never see these buttons.
+export function Speak({text}) {
+  const {user}=useDemo();
+  return user?.role==='worker'?<Listen text={text} label="اردو میں سنیں"/>:null;
 }
 const waveform=[5,12,8,20,14,29,19,36,25,14,31,42,23,33,16,26,36,21,11,24,17,8,13,5];
 export function VoiceSignal({children,listening=false}) {

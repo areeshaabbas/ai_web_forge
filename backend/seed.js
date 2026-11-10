@@ -23,7 +23,7 @@ export async function seed(store,{reset=false}={}) {
       const options={session};
       const meta=db.collection('meta');
       if (reset) {
-        for (const name of ['users','requests','bookings','messages','counters','meta']) {
+        for (const name of ['users','requests','bookings','messages','payments','counters','meta']) {
           await db.collection(name).deleteMany({},options);
         }
       }

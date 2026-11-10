@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, ClipboardList, Plus, X } from 'lucide-react';
-import { Field, pk } from './ui';
+import { Field, pk, Speak } from './ui';
 
 const labels={PENDING:'Awaiting approval',APPROVED:'Approved',DECLINED:'Declined',WITHDRAWN:'Withdrawn'};
 export default function ExtraWork({booking,role,busy,onPropose,onDecide}) {
@@ -13,6 +13,7 @@ export default function ExtraWork({booking,role,busy,onPropose,onDecide}) {
     <div className="eyebrow"><ClipboardList size={16}/> AFTER BOOKING</div>
     <h2 id="extra-work-title">Pehle Poochho</h2>
     <p>Get approval before doing extra work.</p>
+    <Speak text="پہلے پوچھو۔ کام کے دوران اگر کوئی اضافی کام یا چیز درکار ہو تو پہلے گاہک سے منظوری لیں۔ وجہ اور رقم لکھ کر بھیجیں۔ گاہک منظور کرے تو کل رقم بڑھ جائے گی۔"/>
     <dl className="extra-totals">
       <div><dt>Original agreed price</dt><dd>{pk(booking.price)}</dd></div>
       {booking.addons.map(item=><div key={item.id} className="extra-line">

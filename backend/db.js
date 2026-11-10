@@ -18,7 +18,10 @@ export async function connect({
       db.collection('bookings').createIndex({workerId:1,status:1,startsAt:1,endsAt:1}),
       db.collection('bookings').createIndex({customerId:1,_id:-1}),
       db.collection('bookings').createIndex({requestId:1},{unique:true,partialFilterExpression:{active:true}}),
-      db.collection('messages').createIndex({bookingId:1,_id:1})
+      db.collection('messages').createIndex({bookingId:1,_id:1}),
+      db.collection('users').createIndex({email:1},{unique:true,partialFilterExpression:{email:{$exists:true}}}),
+      db.collection('payments').createIndex({bookingId:1,_id:1}),
+      db.collection('payments').createIndex({customerId:1,_id:-1})
     ]);
     await seed(store);
     return store;

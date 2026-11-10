@@ -1,75 +1,86 @@
-# Roshan Rozgar · روشن روزگار
+# Roshan Rozgar — final submission
 
-**Bolo, Kaam Ho Gaya.** A voice-first, hyperlocal skilled-worker marketplace for Islamabad and Rawalpindi. Built for COMSATS AI Web Forge.
+An Urdu / Roman Urdu / English skilled-worker marketplace for Islamabad and Rawalpindi. This revision keeps the supplied UI and stack: React + Vite, Express, MongoDB, optional Gemini.
 
-## Run on Windows with MongoDB Atlas
+## Start on Windows (Command Prompt)
 
-1. Install Node.js 24. In Atlas, create or select a cluster, create a database user with read/write access to `roshan_rozgar`, and add the IP address of the computer or host that will run the app to your project IP access list. In **Connect → Drivers**, copy the connection string and insert your database user password. URL-encode reserved characters in the password.
-2. Extract the project and open Command Prompt in `roshan-rozgar`.
+Extract this ZIP into a **new folder**, not inside your old project. Open Command Prompt in the extracted `roshan-rozgar` folder (the one containing `package.json`). Stop old dev servers with Ctrl+C first.
 
-```cmd
+```bat
+npm ci
 copy backend\.env.example backend\.env
 notepad backend\.env
 ```
 
-3. Replace the `MONGODB_URI` line with your Atlas connection string, keep `MONGODB_DB=roshan_rozgar`, and save. `GEMINI_API_KEY` is optional. Keep the connection string and API key in `backend/.env`.
-4. Run these commands from the project root.
+Set `MONGODB_URI` to your Atlas connection string, with a database user allowed to read/write the database and your machine allowed by Atlas Network Access. Use URL-encoded credentials in the URI. Keep `MONGODB_DB=roshan_rozgar` to use your existing data, or choose a different database name for a fresh demo. Transactions require Atlas or a replica set; a standalone MongoDB instance will not work.
 
-```cmd
-npm.cmd ci
-npm.cmd run build
-npm.cmd start
+Set `GEMINI_API_KEY` to your own key to enable Gemini. `GEMINI_MODEL` is configurable; the example uses `gemini-2.5-flash`. If your account does not have access to that model, set an available model supporting structured JSON output. Keep `DEMO_MODE=false`.
+
+```bat
+npm run dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001). [The health endpoint](http://localhost:3001/api/health) returns `"database":"mongodb"` when the database responds. The first startup creates indexes and seeds fictional accounts, workers, bookings, messages, ratings, a sample evidence image, and a pending extra-work request.
+Open the **frontend URL printed by Vite**, normally http://localhost:5173. Do not open an old tab pointing at another project's port. Node 24 or newer is required.
 
-[MongoDB Atlas connection guide](https://www.mongodb.com/docs/atlas/connect-to-database-deployment/)
+For a single-server production preview:
 
-### Run with a local replica set
-
-Use a local MongoDB replica set if you want a demo without relying on venue internet. The app requires a replica set or Atlas because booking confirmation uses transactions. If Docker Desktop is available, run the following in Command Prompt:
-
-```cmd
-docker run -d --name roshan-mongo -p 127.0.0.1:27017:27017 -v roshan-mongo-data:/data/db mongo:7.0 --replSet rs0 --bind_ip_all
-docker exec roshan-mongo mongosh --quiet --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+```bat
+npm run build
+npm start
 ```
 
-Wait for the replica to elect a primary, then use the default URI in `backend/.env.example`. Keep this Docker configuration on your own machine. The port is bound to loopback and the container is for local demo data. To restart an existing container, run `docker start roshan-mongo`.
+Open http://localhost:3001. The backend serves the built frontend and `/api` from the same origin. For hosting, set environment variables on the server, run `npm ci` and `npm run build`, then `npm start`. Use HTTPS for microphone support beyond localhost. No frontend API key is needed.
 
-For frontend development, use `npm run dev`. Vite runs on port 5173 and proxies API requests to port 3001. For a hosted demo, build the project and run `npm start` on a Node 24 host with `MONGODB_URI`, `MONGODB_DB`, and optionally `GEMINI_API_KEY` set as server secrets. The app serves the frontend and API on one origin. Use HTTPS for browser dictation.
+## What changed
 
-### Reset a demo database
+- Public demo impersonation is OFF by default. `x-demo-user` cannot authenticate a visitor unless the server explicitly enables demo mode. Real signed-in users can update only their own worker profile/availability; role and email cannot be changed through profile edits.
+- Fixed a route-remount race that redirected newly signed-up workers to the dashboard instead of their profile input form. Added explicit accessible names to password inputs.
+- Guest visitors can browse and reach sign-up/sign-in without needing a demo persona. Booking/dashboard routes require sign-in. Invalid tokens never fall back to a demo identity.
+- Worker descriptions and manual fields are available. Existing workers can choose **Describe my work / use AI**, review the suggestions and save. Missing AI fields do not erase existing information. Name updates refresh the account header.
+- Locality fields accept typed neighbourhoods, with suggestions. Existing city/trade/rate/rating/experience filters and the visual layout are retained.
+- AI job scoping returns suggested skills, targeted clarification questions and a work-agreement checklist. Suggested skills rank actual database results when using best-match sorting, with visible matching reasons. Customers can explicitly add the checklist to their booking brief, which is then saved with the request and agreement. Trade, area and calendar filtering remain database-driven.
+- Gemini failures are visibly labelled as local extraction. Local rules still supply a basic checklist; they are not presented as generative AI. AI calls have an account-level limit of 10/minute per server instance.
+- Token expiry uses the application's clock consistently; malformed tokens with extra segments are rejected.
+- Cash selected for later payment is not shown as paid. Digital payments are clearly simulations. Cancellation clears pending cash records; already simulated-paid jobs cannot be cancelled because this MVP has no refund flow.
+- Work-photo public access requires completed, reviewed work; booking participants can see their own evidence beforehand.
+- Refreshed search results update the selected worker, preventing stale displayed rates. Invalid or over-24-hour slots are caught in the frontend as well as the backend.
+- Expanded `.gitignore`; removed the uploaded `.env`, unrelated Python wheels, dependencies and generated build output from the source package.
 
-Stop the app. Double-check the configured database is dedicated to the demo, then run `npm run db:reset -- --confirm-demo-reset`. This replaces data in the app's MongoDB collections. Existing SQLite data is separate and is not imported automatically.
+## Five-minute judge demo
 
-## Judge demo
+1. Keep `DEMO_MODE=false`. Create a **worker** account. The worker description box appears immediately after sign-up.
+2. Describe: `Mera naam Usman Ali hai. Main 12 saal se electrician ka kaam kar raha hoon. Main Satellite Town, Rawalpindi mein wiring, fan repair aur switch board ka kaam karta hoon.` Review the fields, enter an indicative price, and save.
+3. Open a separate browser/incognito session and create a **customer** account. Describe: `Fan repair and wiring in Satellite Town Rawalpindi today.` Show the extraction source, clarification questions, checklist, and skill-match reasons. Answer questions by adding detail to the original description and running it again.
+4. Review the brief, select your newly registered worker, choose a future slot and offer a price. Send the request.
+5. In the worker session, open Bookings & chat, then accept or counteroffer. The other party accepts the latest terms. Show chat, occupied slots and customer-approved extra work.
+6. Customer confirms completion and adds a review. Show the updated profile rating. If demonstrating payment, use cash or **test details only**; no real payment provider is connected.
+7. Try editing another worker using your session: the backend rejects it. The public interface has no account-switcher with demo mode off.
 
-**Pehle Poochho (ask first):** Use the default **Customer · Ayesha Khan**. Go to **Bookings & chat → Confirmed bookings → Ceiling fan repair**. A fictional Rs. 450 capacitor replacement is awaiting approval on a Rs. 1,500 job. Decline it and show that the agreed total remains Rs. 1,500. Switch to the worker view, request a different extra, switch back, and approve it. Both roles see the same decision and revised total. The original agreement stays visible.
+Seeded profiles and sample reviews are fictional. They remain visible for presentation, but are not claimable by real accounts; use two newly created accounts for the complete booking demonstration. For a deliberately public sandbox on an isolated database only, `DEMO_MODE=true` restores the old fictional-persona switcher. Anyone can operate those fictional accounts in that mode. Never enable it for a real deployment.
 
-**Full journey:**
+## AI: honest submission explanation
 
-1. Choose **New demo worker** and start Bolo Profile. Use the example, review the extracted fields, enter Rs. 1,200 if desired, and save the profile with availability on.
-2. Switch to the customer and enter “Mera fan kharab hai, electrician chahiye jo aaj aa sakay.” Choose **Rawalpindi → Satellite Town** and request the new worker, Usman Ali.
-3. Open the booking. Use a Roman Urdu quick reply and a price counteroffer from the worker view. Accept it from the customer view.
-4. In the confirmed booking, the worker can preview and upload a JPEG, PNG, or WebP up to 1 MB. The customer can approve or decline any pending extra, confirm completion, and submit a review.
-5. Show the rating update on the worker profile. To show cancellation or decline, create another request and use its confirmation dialog. To show no matches, set the minimum experience above the local workers' experience.
+AI reduces typing and turns an unstructured description into a reviewable profile or service request, asks for missing details, drafts the job scope, and suggests skill signals used to rank eligible workers. It does not invent workers, availability, prices or credentials, and never automatically accepts an agreement. Browser speech recognition handles transcription separately from Gemini. Urdu speech playback depends on the device's installed voices. Manual input remains usable without microphone support.
 
-## Backend and database
+Without a valid Gemini key, this is a rules-based fallback demo, **not a live Gemini demonstration**. The UI explicitly says so. To verify live AI before judging, configure the key, restart the backend, submit a description and confirm the UI says **Understood with Gemini** or **Extracted with Gemini**. A local fallback message means the provider request did not succeed; check key, model access, quota and connectivity. Descriptions are sent to Google when configured; do not enter private addresses or sensitive details into the AI prompt.
 
-| Collection | Data |
-| --- | --- |
-| `users` | Fictional customer and worker accounts, profile, skills, service area, prices, availability and calendar revision |
-| `requests` | Customer repair descriptions, urgency, trade and locality |
-| `bookings` | Versioned terms, participants, status, reviews, evidence and extra-work decisions |
-| `messages` | Booking conversations, sender and timestamp |
-| `counters`, `meta` | API ID sequences and seed state |
+SDK structured-output reference: https://ai.google.dev/gemini-api/docs/structured-output
 
-The server validates requests with Zod. A unique partial index prevents two active bookings for one request. Booking confirmations for a worker write the same calendar revision inside a MongoDB transaction before checking for overlapping slots, so concurrent confirmations cannot both reserve the same time. Proposal versions reject stale acceptance. Ratings are calculated from completed bookings. Extra-work decisions are atomically applied to the booking, and only approved extras contribute to the current total.
+## Validation
 
-`npm test` runs the REST integration test against a temporary MongoDB replica set. The first run may download a MongoDB binary. Set `MONGODB_TEST_URI` if you already have a test replica set. The test creates and drops its own temporary database. Run it against a test cluster only.
+```bat
+npm test
+npm run build
+```
 
-## Gemini, voice and demo scope
+Tests use disposable MongoDB replica sets and can download a MongoDB binary on their first run. They do not use your backend `.env` or reset your application database. Coverage includes booking lifecycle, overlapping slots, negotiations, reviews, payments, profile ownership, forged demo headers, token expiry, AI throttling and missing-detail extraction. A DOM-based UI interaction check passed: guest navigation, worker signup, profile description/extraction/save/edit, sign-out, customer signup, job analysis and checklist adoption, with no runtime JavaScript errors. Full browser visual checks could not run in the preparation environment because Chromium startup was blocked. Check desktop/mobile layouts and microphone permissions on your presentation machine.
 
-Copy `backend/.env.example` to `backend/.env` if needed. Set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) and restart to enable Gemini. The UI labels Gemini output and local fallback separately. Dictation uses browser Web Speech APIs and depends on browser permissions and language support. Text entry remains available. All seeded profiles, bookings and reviews are fictional. The sample evidence is a labeled illustration.
+Live Gemini, Atlas credentials, real payment processing and device microphone/Urdu voice output must be checked in your own environment. No live API credentials were used in validation.
 
-The role selector is for a controlled hackathon demo. Real accounts and production authentication are out of scope. The demo allows completion without waiting for the scheduled visit, and availability and chat can be refreshed when switching devices. Protect any hosted demo at the hosting layer. The generated implementation was built with ChatGPT/Codex assistance.
+## Repository / data care
+
+`.gitignore` is in the ZIP root alongside `package.json`. Dotfiles may appear hidden in some viewers. Never commit `backend/.env`. If an earlier `.env` is already tracked, remove it from Git tracking using `git rm --cached backend/.env`; ignore rules do not remove existing tracked files. Rotate credentials if you previously published them. The original ZIP included an `.env`; this package deliberately does not include its values.
+
+`npm run db:reset -- --confirm-demo-reset` is destructive: it resets that configured database. It is not required for this update. Back up your data first if intentionally using it.
+
+This is a hackathon MVP, not a production payment or identity-verification service. Authentication tokens are stored in browser local storage; distributed rate limiting, account recovery, phone verification, moderation and refund settlement remain future work. No redesign or unrelated features were added.

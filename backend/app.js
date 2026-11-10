@@ -6,6 +6,8 @@ import { connect } from './db.js';
 import { cleanText, profile, request, requireThat as check, slot, terms, trades, cities } from './domain.js';
 import { marketplace } from './market.js';
 import { extractionService } from './ai.js';
+import { authService, signinBody, signupBody } from './auth.js';
+import { paymentBody, paymentService } from './payments.js';
 
 const id = z.coerce.number().int().positive();
 const rating = z.number().int().min(1).max(5);
@@ -16,16 +18,20 @@ const bookingAction = z.discriminatedUnion('action', [
 const searchQuery = z.object({
   trade:z.enum(trades).optional(), city:z.enum(cities).optional(), locality:cleanText(90).optional(),
   available:z.enum(['true','false']).transform(v=>v==='true').optional(),
-  minRating:z.coerce.number().min(1).max(5).optional(), minExperience:z.coerce.number().int().min(0).max(80).optional(),
+  minRating:z.coerce.number().min(1).max(5).optional(),
+  minPrice:z.coerce.number().int().min(0).max(1000000).optional(), maxPrice:z.coerce.number().int().min(0).max(1000000).optional(),
+  sort:z.enum(['best','rating','priceLow','priceHigh']).optional(), minExperience:z.coerce.number().int().min(0).max(80).optional(),
   startsAt:z.string().optional(),endsAt:z.string().optional()
 });
 const presetMessages = [
   'Main available hoon.', 'Kitne bajay aana hai?', 'Meri price Rs. 1500 hai.', 'Theek hai, confirm kar dein.'
 ];
 
-export function createApp({store, extract=extractionService(), now}) {
+export function createApp({store, extract=extractionService(), now, demoMode=process.env.DEMO_MODE==='true'}) {
   const {db}=store;
   const market = marketplace(store,now);
+  const auth = authService(store,now);
+  const payments = paymentService(store,market,now);
   const app = express();
   const api = express.Router();
   app.disable('x-powered-by');
@@ -37,27 +43,45 @@ export function createApp({store, extract=extractionService(), now}) {
   app.use('/api', api);
   api.use((_req,res,next) => { res.set('Cache-Control','no-store'); next(); });
   async function actor(req,role,optional=false) {
-    const parsed=id.safeParse(req.get('x-demo-user'));
-    const user=parsed.success&&await db.collection('users').findOne({_id:parsed.data},{projection:{name:1,role:1}});
+    // A signed-in account (Bearer token) always wins. The x-demo-user header only selects the seeded fictional demo accounts.
+    let user=await auth.fromToken(req.get('authorization'));
+    if (demoMode&&!user&&!req.get('authorization')) {
+      const parsed=id.safeParse(req.get('x-demo-user'));
+      user=parsed.success&&await db.collection('users').findOne({_id:parsed.data,email:{$exists:false}},{projection:{name:1,role:1}});
+    }
     if (!user&&optional) return null;
-    check(user,401,'Select a fictional demo user.');
-    check(!role||user.role===role,403,'Switch to the corresponding demo role.');
+    check(user,401,'Please sign in to continue.');
+    check(!role||user.role===role,403,'This action is only available to a '+role+' account.');
     return {id:user._id,name:user.name,role:user.role};
   }
   async function owner(req,workerId) {
-    check((await actor(req,'worker')).id===workerId,403,'Switch to this worker to edit their profile.');
+    check((await actor(req,'worker')).id===workerId,403,'You can only edit your own worker profile.');
   }
   api.get('/health',async (_req,res)=>{
     await db.command({ping:1});
-    res.json({ok:true,demo:true,database:'mongodb'});
+    res.json({ok:true,demo:demoMode,database:'mongodb'});
   });
   api.get('/demo-users',async (_req,res)=>{
-    const users=await db.collection('users').find({},{projection:{name:1,role:1}}).sort({_id:1}).toArray();
+    if (!demoMode) return res.json([]);
+    const users=await db.collection('users').find({email:{$exists:false}},{projection:{name:1,role:1}}).sort({_id:1}).toArray();
     res.json(users.map(({_id,...user})=>({id:_id,...user})));
   });
+  api.post('/auth/signup',async (req,res)=>res.status(201).json(await auth.signup(signupBody.parse(req.body))));
+  api.post('/auth/signin',async (req,res)=>res.json(await auth.signin(signinBody.parse(req.body),req.ip)));
+  api.get('/auth/me',async (req,res)=>{
+    const user=await auth.fromToken(req.get('authorization'));
+    check(user,401,'Your session has expired. Please sign in again.');
+    res.json(auth.publicUser(user));
+  });
+  const aiUsage=new Map();
   for (const [path,type] of [['worker-profile','profile'],['understand-job','job']]) {
     api.post('/ai/'+path,async (req,res)=>{
-      await actor(req,type==='profile'?'worker':'customer');
+      const user=await actor(req,type==='profile'?'worker':'customer');
+      const instant=Date.now();
+      for(const [key,row] of aiUsage) if(row.until<=instant) aiUsage.delete(key);
+      const usage=aiUsage.get(user.id)??{count:0,until:instant+60000};
+      check(usage.count<10,429,'Please wait a minute before using AI again.');
+      usage.count++;aiUsage.set(user.id,usage);
       const {text}=z.object({text:cleanText(2000,3)}).parse(req.body);
       res.json(await extract(type,text));
     });
@@ -97,6 +121,8 @@ export function createApp({store, extract=extractionService(), now}) {
     res.status(201).json(await market.createBooking(await actor(req,'customer'),data));
   });
   api.patch('/bookings/:id',async (req,res)=>res.json(await market.updateBooking(id.parse(req.params.id),await actor(req),bookingAction.parse(req.body))));
+  api.get('/bookings/:id/payments',async (req,res)=>res.json(await payments.list(id.parse(req.params.id),await actor(req))));
+  api.post('/bookings/:id/payments',async (req,res)=>res.status(201).json(await payments.pay(id.parse(req.params.id),await actor(req,'customer'),paymentBody.parse(req.body))));
   api.get('/bookings/:id/messages',async (req,res)=>res.json(await market.listMessages(id.parse(req.params.id),await actor(req))));
   api.post('/bookings/:id/messages',async (req,res)=>{
     const data=z.union([z.object({body:cleanText(500)}),z.object({preset:z.number().int().min(0).max(presetMessages.length-1)})]).parse(req.body);

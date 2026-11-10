@@ -154,6 +154,52 @@ footer{background:var(--white);border-top:1px solid var(--border);padding:23px 0
 .review{padding:12px 0;border-top:1px solid var(--border);margin-top:9px}
 .review strong{display:flex;align-items:center;gap:5px}
 .review small{font-size:.73rem;color:var(--muted)}
+
+/* ---- Urdu voice buttons ---- */
+.speak{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0}
+.speak .btn{direction:rtl}
+
+/* ---- Accounts & payments ---- */
+.header-actions .btn.mini{white-space:nowrap}
+.account-chip{display:flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:9px;padding:5px 10px;background:var(--mint);color:var(--dark)}
+.account-chip span{display:flex;flex-direction:column;line-height:1.15}
+.account-chip strong{font-size:.82rem}
+.account-chip small{font-size:.68rem;color:var(--muted)}
+.auth-screen .page-intro{margin-bottom:20px}
+.auth-form{display:grid;gap:2px}
+.auth-form .btn.wide{margin-top:8px}
+.auth-switch{text-align:center;margin-top:12px;font-size:.88rem}
+.role-picker{border:0;padding:0;margin:0 0 4px}
+.role-picker legend{font-size:.84rem;font-weight:760;color:var(--ink);margin-bottom:6px;padding:0}
+.trade-tiles.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.password-wrap{position:relative;display:block}
+.password-wrap input{padding-right:44px}
+.password-toggle{position:absolute;right:2px;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:40px;height:40px;border:0;background:transparent;color:var(--muted);border-radius:8px}
+.password-toggle:hover{color:var(--dark);background:var(--mint)}
+.field-hint{display:block;margin-top:4px;color:var(--muted);font-size:.74rem;font-weight:500}
+.card-brand{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:.72rem;font-weight:800;color:var(--green);background:var(--mint);padding:3px 8px;border-radius:12px;pointer-events:none}
+.payment .eyebrow{margin-bottom:8px}
+.pay-summary{display:grid;gap:0;margin:14px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.pay-summary div{display:flex;justify-content:space-between;gap:10px;padding:9px 12px;background:var(--white);border-top:1px solid var(--border);font-size:.9rem}
+.pay-summary div:first-child{border-top:0}
+.pay-summary dt{color:var(--muted)}
+.pay-summary dd{margin:0;font-weight:800;color:var(--dark)}
+.pay-summary .due{background:var(--mint)}
+.pay-summary .due dd{font-size:1.05rem}
+.method-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:6px 0 10px}
+.method-tabs .tile{justify-content:center;flex-direction:column;gap:4px;text-align:center;font-size:.78rem;min-height:56px}
+.pay-note{display:block;margin-top:10px;color:var(--muted);font-size:.74rem;line-height:1.4}
+.receipt{flex-wrap:wrap;background:#e4f0df;color:#235b37}
+.pay-history{list-style:none;padding:0;margin:6px 0 0}
+.pay-history li{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--border);font-size:.86rem}
+.pay-history li>div{min-width:0;overflow-wrap:anywhere}
+.pay-history small{display:block;color:var(--muted);font-size:.72rem}
+.pay-history li>span{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}
+@media(max-width:500px){
+ .method-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .account-chip small{display:none}
+ .header-actions{flex-wrap:wrap;justify-content:flex-end}
+}
 @media(max-width:1000px){
  .container,.narrow{width:min(1200px,calc(100% - 36px))}
  .topbar{gap:10px;flex-wrap:wrap;padding:10px 0}

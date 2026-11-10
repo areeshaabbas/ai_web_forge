@@ -16,7 +16,7 @@ test('both roles share a persisted lifecycle with slot and review safeguards', a
   });
   store=await connect({uri:process.env.MONGODB_TEST_URI||mongo.getUri(),name:'roshan_test_'+Date.now()});
   const clock=()=>new Date('2026-11-10T10:00:00Z');
-  server=createApp({store,now:clock,extract:extractionService({apiKey:''})}).listen(0,'127.0.0.1');
+  server=createApp({store,demoMode:true,now:clock,extract:extractionService({apiKey:''})}).listen(0,'127.0.0.1');
   await once(server,'listening');
   async function api(path,{method='GET',user=1,data,status=200}={}) {
     const response=await fetch('http://127.0.0.1:'+server.address().port+'/api'+path,{method,headers:{'x-demo-user':String(user),'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});

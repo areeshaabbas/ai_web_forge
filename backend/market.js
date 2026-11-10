@@ -61,10 +61,20 @@ export function marketplace(store,now=()=>new Date()) {
     const query={role:'worker',profile:{$exists:true}};
     for (const field of ['trade','city','locality']) if(filters[field]) query['profile.'+field]=filters[field];
     if(filters.minExperience) query['profile.experienceYears']={$gte:filters.minExperience};
+    // Labour rate filter. Workers who haven't set a rate ("Discuss price") are left out when a rate limit is chosen.
+    if(filters.minPrice!=null||filters.maxPrice!=null) query['profile.price']={...(filters.minPrice!=null&&{$gte:filters.minPrice}),...(filters.maxPrice!=null&&{$lte:filters.maxPrice})};
     const rows=await users.find(query,{collation:{locale:'en',strength:2}}).toArray();
+    const rate=row=>row.price??Infinity;
+    const byBest=(a,b)=>Number(b.available)-Number(a.available)||(b.rating??0)-(a.rating??0)||b.experienceYears-a.experienceYears||a.id-b.id;
+    const order={
+      best:byBest,
+      rating:(a,b)=>(b.rating??0)-(a.rating??0)||b.reviewCount-a.reviewCount||byBest(a,b),
+      priceLow:(a,b)=>rate(a)-rate(b)||byBest(a,b),
+      priceHigh:(a,b)=>(b.price??-1)-(a.price??-1)||byBest(a,b)
+    }[filters.sort??'best'];
     return (await cards(rows,filters))
       .filter(row=>(!filters.available||row.available)&&(!filters.minRating||row.rating>=filters.minRating))
-      .sort((a,b)=>Number(b.available)-Number(a.available)||(b.rating??0)-(a.rating??0)||b.experienceYears-a.experienceYears||a.id-b.id);
+      .sort(order);
   }
   async function saveWorker(id,data,create) {
     await transaction(store,async session=>{
@@ -89,7 +99,7 @@ export function marketplace(store,now=()=>new Date()) {
   async function reviews(id) {
     check(await users.findOne(workerFilter(id)),404,'Worker profile not found.');
     const rows=await bookings.find({workerId:id,review:{$exists:true}},{projection:bookingProjection}).sort({'review.createdAt':-1,_id:-1}).toArray();
-    return rows.map(row=>({bookingId:row._id,...row.review,customerName:row.customerName,seeded:row.seeded,hasEvidence:Number(Boolean(row.evidence))}));
+    return rows.map(row=>({bookingId:row._id,...row.review,customerName:row.customerName,seeded:row.review.seeded??row.seeded,hasEvidence:Number(Boolean(row.evidence))}));
   }
   async function getBooking(id,actor,session) {
     const row=await bookings.findOne(own(id,actor),{session,projection:bookingProjection});
@@ -161,6 +171,8 @@ export function marketplace(store,now=()=>new Date()) {
           updates={status:'REJECTED',active:false};
           break;
         case 'cancel':
+          check(!(await db.collection('payments').findOne({bookingId:id,status:'PAID'},{session})),409,'A payment has been recorded. Refund handling is not available in this demo.');
+          await db.collection('payments').updateMany({bookingId:id,status:'PAY_ON_COMPLETION'},{$set:{status:'CANCELLED'}},{session});
           check(chatStates.includes(row.status),409,'This booking is already closed.');
           updates={status:'CANCELLED',active:false,addons:row.addons.map(item=>item.status==='PENDING'?{...item,status:'WITHDRAWN',decidedAt:stamp()}:item)};
           break;
@@ -186,7 +198,7 @@ export function marketplace(store,now=()=>new Date()) {
   async function addReview(actor,{bookingId,rating,feedback}) {
     const row=await getBooking(bookingId,actor);
     check(row.status==='COMPLETED',409,'Complete the job before adding a review.');
-    const review={rating,feedback,createdAt:stamp()};
+    const review={rating,feedback,seeded:0,createdAt:stamp()};
     const result=await bookings.updateOne({...own(bookingId,actor),status:'COMPLETED',review:{$exists:false}},{$set:{review}});
     check(result.modifiedCount,409,'This booking already has a review.');
     return {bookingId,...review};
@@ -197,7 +209,7 @@ export function marketplace(store,now=()=>new Date()) {
     check(result.matchedCount,409,'Only booked or completed jobs can have a work photo.');
   }
   async function getEvidence(id,actor) {
-    const query=actor?{_id:id,$or:[{status:'COMPLETED'},own(id,actor)]}:{_id:id,status:'COMPLETED'};
+    const query=actor?{_id:id,$or:[{status:'COMPLETED',review:{$exists:true}},own(id,actor)]}:{_id:id,status:'COMPLETED',review:{$exists:true}};
     const row=await bookings.findOne({...query,evidence:{$exists:true}},{projection:{evidence:1}});
     check(row,404,'Work photo not found.');
     return {mime:row.evidence.mime,photo:Buffer.from(row.evidence.photo.value())};

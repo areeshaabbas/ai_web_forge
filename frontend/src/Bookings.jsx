@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, BriefcaseBusiness, CalendarDays, Check, CircleCheck, Clock3, ImagePlus, MapPin, MessageCircle, RefreshCw, Star, Wallet, X } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import ExtraWork from './ExtraWork';
-import { ErrorNote, Field, Intro, Listen, pk, prettyTime, SlotFields, slotBody, toPK, useDemo, useTask, VoiceInput, WorkerCard } from './ui';
+import PaymentPanel from './Payment';
+import { authHeaders, ErrorNote, Field, Intro, pk, prettyTime, SlotFields, slotBody, Speak, toPK, useDemo, useTask, VoiceInput, WorkerCard } from './ui';
 
 const openStates=['REQUESTED','NEGOTIATING'];
 const presets=['Main available hoon.','Kitne bajay aana hai?','Meri price Rs. 1500 hai.','Theek hai, confirm kar dein.'];
@@ -17,7 +18,7 @@ function BookingList({rows,user}) {
   </Link>)}</div>;
 }
 export function Dashboard() {
-  const {user,api}=useDemo();
+  const {user,api,token}=useDemo();
   const [worker,setWorker]=useState(null);
   const [bookings,setBookings]=useState(null);
   const [availability,setAvailability]=useState(null);
@@ -36,23 +37,24 @@ export function Dashboard() {
   }
   useEffect(()=>{task.run(load);},[api]);
   const groups=[
-    ['Incoming requests',bookings?.filter(b=>b.status==='REQUESTED')],
-    ['Negotiations',bookings?.filter(b=>b.status==='NEGOTIATING')],
-    ['Confirmed bookings',bookings?.filter(b=>b.status==='CONFIRMED')],
-    ['Booking history',bookings?.filter(b=>['COMPLETED','REJECTED','CANCELLED'].includes(b.status))]
+    ['Incoming requests',bookings?.filter(b=>b.status==='REQUESTED'),'نئی درخواستیں۔ یہاں گاہکوں کی نئی درخواستیں آتی ہیں۔ کسی پر کلک کریں، قیمت اور وقت دیکھیں، پھر قبول کریں، نئی شرائط بھیجیں یا انکار کریں۔'],
+    ['Negotiations',bookings?.filter(b=>b.status==='NEGOTIATING'),'بات چیت۔ یہاں قیمت اور وقت پر بات چل رہی ہے۔ جب دونوں فریق آخری شرائط مان لیں تو بکنگ پکی ہو جاتی ہے۔'],
+    ['Confirmed bookings',bookings?.filter(b=>b.status==='CONFIRMED'),'پکی بکنگز۔ یہ وہ کام ہیں جن پر دونوں متفق ہو چکے ہیں۔ مقررہ وقت پر پہنچیں، کام مکمل کریں اور کام کی تصویر اپ لوڈ کریں۔'],
+    ['Booking history',bookings?.filter(b=>['COMPLETED','REJECTED','CANCELLED'].includes(b.status)),'بکنگ کی تاریخ۔ یہاں مکمل، منسوخ اور مسترد شدہ کام نظر آتے ہیں۔']
   ];
-  return <div className="container page hub-screen"><Intro eyebrow={isWorker?'WORKER HUB':'CUSTOMER HUB'} title={'Salam, '+user.name.split(' ')[0]+'.'} description={'Signed in as '+user.name+' · fictional demo account'} icon={BriefcaseBusiness}/>
+  return <div className="container page hub-screen"><Intro eyebrow={isWorker?'WORKER HUB':'CUSTOMER HUB'} title={'Salam, '+user.name.split(' ')[0]+'.'} description={token?'Signed in as '+user.name+(user.email?' · '+user.email:''):'Signed in as '+user.name+' · fictional demo account'} icon={BriefcaseBusiness}/>
     <div className="dashboard-actions">
+      <Speak text="یہ آپ کا ورکر ہب ہے۔ یہاں آپ نئی درخواستیں، بات چیت، پکی بکنگز اور اپنی دستیابی دیکھ سکتے ہیں۔"/>
       {isWorker?<Link className="btn primary" to="/onboard">{worker?'Edit my profile':'Create Bolo Profile'} <ArrowRight size={17}/></Link>:<Link className="btn primary" to="/find">New service request <ArrowRight size={17}/></Link>}
       <button className="btn outline" type="button" disabled={task.pending} onClick={()=>task.run(load)}><RefreshCw size={17}/> Refresh</button>
     </div><ErrorNote error={task.error}/>
-    {isWorker&&worker&&<div className="discover-layout dashboard-summary"><WorkerCard worker={worker}/><section className="panel"><h2>Availability</h2>
+    {isWorker&&worker&&<div className="discover-layout dashboard-summary"><WorkerCard worker={worker}/><section className="panel"><h2>Availability</h2><Speak text="دستیابی۔ نیا کام لینا ہو تو نیا کام قبول کریں کا بٹن دبائیں۔ مصروف ہوں تو نیا کام روک دیں۔ نیچے آپ کے طے شدہ اوقات نظر آتے ہیں۔"/>
       <p>{availability?.accepting?'You’re accepting new jobs.':'New requests are paused.'}</p>
       <button className="btn outline" disabled={task.pending||!availability} onClick={()=>task.run(async()=>{await api('/workers/'+user.id+'/availability','PATCH',{accepting:!availability.accepting});await load();})}>{availability?.accepting?'Pause new jobs':'Accept new jobs'}</button>
       <h3>Reserved slots</h3>{availability?.occupied.length?<ul className="slot-list">{availability.occupied.map(slot=><li key={slot.startsAt}>{prettyTime(slot.startsAt)} → {prettyTime(slot.endsAt)}</li>)}</ul>:<p>No upcoming confirmed slots.</p>}
       <Link to={'/workers/'+worker.id} className="text-link">See ratings &amp; feedback <ArrowRight size={17}/></Link></section></div>}
     {bookings===null&&task.pending&&<p role="status">Loading bookings…</p>}
-    <div className="discover-layout dashboard-groups">{groups.map(([name,rows])=><section key={name} className="panel"><h2>{name} <span className="count">{rows?.length??0}</span></h2>{rows?.length?<BookingList rows={rows} user={user}/>:<p className="subtle">No bookings here yet.</p>}</section>)}</div>
+    <div className="discover-layout dashboard-groups">{groups.map(([name,rows,urdu])=><section key={name} className="panel"><h2>{name} <span className="count">{rows?.length??0}</span></h2><Speak text={urdu}/>{rows?.length?<BookingList rows={rows} user={user}/>:<p className="subtle">No bookings here yet.</p>}</section>)}</div>
     {!isWorker&&requests.some(r=>!r.seeded)&&<section className="panel dashboard-summary"><h2>Saved service requests</h2>{requests.filter(r=>!r.seeded).map(r=><div className="saved-request" key={r.id}><div><strong>{r.problem}</strong><small>{r.trade} · {r.locality}, {r.city}</small></div>{!bookings?.some(b=>b.requestId===r.id&&!['REJECTED','CANCELLED'].includes(b.status))&&<Link className="btn quiet mini" to={'/find?requestId='+r.id}>Find workers <ArrowRight size={16}/></Link>}</div>)}</section>}
   </div>;
 }
@@ -76,15 +78,15 @@ function Proposal({booking,onSave,pending,onCancel}) {
     <div className="actions"><button className="btn primary" disabled={pending}>Send counteroffer</button><button className="btn quiet" type="button" onClick={onCancel}>Discard changes</button></div>
   </form>;
 }
-function WorkPhoto({id,completed,userId}) {
+function WorkPhoto({id,completed,userId,token}) {
   const [url,setUrl]=useState('');
   useEffect(()=>{
     if (completed) return;
     let live=true, object;
-    fetch('/api/bookings/'+id+'/evidence',{headers:{'x-demo-user':String(userId)}})
+    fetch('/api/bookings/'+id+'/evidence',{headers:authHeaders(userId,token)})
       .then(r=>{if(r.ok)return r.blob();}).then(b=>{if(live&&b){object=URL.createObjectURL(b);setUrl(object);}}).catch(()=>{});
     return()=>{live=false;if(object)URL.revokeObjectURL(object);};
-  },[id,completed,userId]);
+  },[id,completed,userId,token]);
   return (completed||url)&&<img className="work-photo" alt="Work evidence uploaded by the worker" src={completed?'/api/bookings/'+id+'/evidence':url}/>;
 }
 function CloseBookingDialog({kind,pending,error,onDismiss,onConfirm}) {
@@ -146,7 +148,7 @@ function PhotoUpload({hasEvidence,pending,onUpload}) {
 
 export function Booking() {
   const {id}=useParams();
-  const {api,user,choose}=useDemo();
+  const {api,user,choose,token}=useDemo();
   const [booking,setBooking]=useState(null);
   const [messages,setMessages]=useState([]);
   const [message,setMessage]=useState('');
@@ -230,13 +232,13 @@ export function Booking() {
   return <div className="container page">
     <Link className="text-link" to="/dashboard">← Back to dashboard</Link>
     <Intro eyebrow="03–04 / PAKKI BAAT" title={closed?(booking.status==='REJECTED'?'Request declined.':'Booking cancelled.'):confirmed?<>One less thing<br/>to worry about.</>:completed?'How did the job go?':<>A fair price.<br/>A clear plan.</>} description={booking.description+' · '+booking.workerName+' with '+booking.customerName+' · Booking #'+booking.id} icon={MessageCircle}/>
-    <div className="dashboard-actions"><Status status={booking.status}/><button className="btn quiet mini" disabled={task.pending} onClick={()=>task.run(load)}><RefreshCw size={16}/> Refresh</button><button className="btn outline mini" onClick={()=>choose(actorId)}>Switch to {user.role==='worker'?'customer':'worker'} view <ArrowRight size={16}/></button></div>
+    <div className="dashboard-actions"><Status status={booking.status}/><Speak text={closed?'یہ بکنگ بند ہو چکی ہے۔':completed?'کام مکمل ہو گیا ہے۔ گاہک کی رائے اور ریٹنگ آپ کے پروفائل پر نظر آئے گی۔':confirmed?'بکنگ پکی ہو گئی ہے۔ مقررہ وقت پر پہنچیں۔ اضافی کام ہو تو پہلے گاہک سے منظوری لیں۔ کام ختم ہو تو تصویر بھیجیں۔':'یہ بکنگ کا معاہدہ ہے۔ قیمت، جگہ اور وقت دیکھیں۔ ٹھیک ہو تو تصدیق کریں، ورنہ نئی شرائط تجویز کریں۔'}/><button className="btn quiet mini" disabled={task.pending} onClick={()=>task.run(load)}><RefreshCw size={16}/> Refresh</button>{!token&&<button className="btn outline mini" onClick={()=>choose(actorId)}>Switch to {user.role==='worker'?'customer':'worker'} view <ArrowRight size={16}/></button>}</div>
     {!closeAction&&<ErrorNote error={task.error}/>}
     {closeAction&&<CloseBookingDialog kind={closeAction} pending={task.pending} error={task.error} onDismiss={dismissClose} onConfirm={()=>action(closeAction)}/>}
     {notice&&<p className="callout" role="status"><Check size={16}/> {notice}</p>}
     <div className={'discover-layout booking-layout'+(confirmed||completed?' with-evidence':'')}>
       <section className={'panel agreement '+(booking.status==='CONFIRMED'?'confirmed':'')}>
-        <div className="section-head"><div><h2>{booking.status==='CONFIRMED'?'Your confirmed agreement':'Booking agreement'}</h2><p>{booking.description}</p></div>{booking.status==='CONFIRMED'&&<CircleCheck size={30}/>}</div>
+        <div className="section-head"><div><h2>{booking.status==='CONFIRMED'?'Your confirmed agreement':'Booking agreement'}</h2><p>{booking.description}</p><Speak text="بکنگ کا معاہدہ۔ اس میں قیمت، جگہ اور وقت لکھے ہیں۔ دوسرے فریق کی شرائط ٹھیک ہوں تو تصدیق کریں، ورنہ اپنی شرائط بھیجیں۔"/></div>{booking.status==='CONFIRMED'&&<CircleCheck size={30}/>}</div>
         <TermsSummary booking={booking}/>
         {open&&<div className="offer-state"><strong>{canConfirm?'Your response is needed':'Awaiting response'}</strong><p>{canConfirm?'Accept the latest terms or send a counteroffer.':'The other party needs to accept the latest terms.'}</p></div>}
         {booking.status==='CONFIRMED'&&<p className="match"><Check size={16}/> This slot is reserved for {booking.workerName}.</p>}
@@ -253,11 +255,12 @@ export function Booking() {
       </section>
     {(confirmed||completed||Boolean(booking.addons?.length))&&<div className="booking-side">
       {(confirmed||Boolean(booking.addons?.length))&&<ExtraWork booking={booking} role={user.role} busy={task.pending} onPropose={proposeExtra} onDecide={decideExtra}/>}
+      {(confirmed||completed)&&<PaymentPanel booking={booking} role={user.role} api={api} pendingExtra={pendingExtra}/>}
     {(confirmed||completed)&&<section className="panel evidence">
       <div className="eyebrow"><Star size={16}/> 05 / KAAM KA SABOOT</div>
-      <h2>{completed?'Work evidence & customer feedback':'Finish the job'}</h2>
+      <h2>{completed?'Work evidence & customer feedback':'Finish the job'}</h2><Speak text={completed?'کام کا ثبوت اور رائے۔ یہاں کام کی تصویر اور گاہک کی رائے ہے۔':'کام ختم کرنا۔ کام مکمل ہونے کے بعد کام کی ایک تصویر اپ لوڈ کریں۔ پھر گاہک کام کی تصدیق کرے گا اور آپ کو ریٹنگ دے گا۔'}/>
       <p>{confirmed?(user.role==='worker'?'Share a photo of the completed work. The customer confirms when the job is done.':'Check the work, then confirm completion to unlock the review.'): 'Evidence and feedback come from this booking.'}</p>
-      {Boolean(booking.hasEvidence)?<WorkPhoto key={photoRevision+'-'+booking.version} id={id} completed={completed} userId={user.id}/>:<p className="empty">No work photo has been uploaded.</p>}
+      {Boolean(booking.hasEvidence)?<WorkPhoto key={photoRevision+'-'+booking.version} id={id} completed={completed} userId={user.id} token={token}/>:<p className="empty">No work photo has been uploaded.</p>}
       {canPhoto&&<PhotoUpload hasEvidence={Boolean(booking.hasEvidence)} pending={task.pending} onUpload={uploadPhoto}/>}
       {confirmed&&user.role==='customer'&&<>{pendingExtra&&<p className="callout">Decide on the pending extra work above before completing this job.</p>}<button className="btn primary completion-action" disabled={task.pending||pendingExtra} onClick={()=>action('complete')}><Check size={18}/> Confirm job completed</button></>}
       {canReview&&<form onSubmit={e=>{e.preventDefault();task.run(async()=>{await api('/reviews','POST',{bookingId:Number(id),rating,feedback});await load();setNotice('Review saved and worker rating updated.');});}}>
@@ -273,7 +276,7 @@ export function Booking() {
         {Boolean(messages.length)&&<details className="closed-history"><summary>View conversation history</summary>{conversation}</details>}
         {user.role==='customer'&&<Link className="btn primary" to={'/find?requestId='+booking.requestId}>Find another worker <ArrowRight size={17}/></Link>}
       </section>:<section className="panel chat">
-        <div className="chat-heading"><div className="eyebrow"><MessageCircle size={16}/> PAKKI BAAT</div><h2>Job conversation</h2><p>{canChat?'Send a message or tap a quick reply.':'Conversation history'}</p></div>
+        <div className="chat-heading"><div className="eyebrow"><MessageCircle size={16}/> PAKKI BAAT</div><h2>Job conversation</h2><Speak text="کام کی بات چیت۔ گاہک کو پیغام بھیجیں یا تیز جواب کا کوئی بٹن دبائیں۔ آپ بول کر بھی لکھ سکتے ہیں۔"/><p>{canChat?'Send a message or tap a quick reply.':'Conversation history'}</p></div>
         {conversation}
         {canChat&&<div className="chat-compose"><strong>Quick replies</strong>
           <div className="chips clickable">{presets.map((m,i)=><button type="button" key={m} disabled={task.pending} onClick={()=>send({preset:i})}>{m}</button>)}</div>
