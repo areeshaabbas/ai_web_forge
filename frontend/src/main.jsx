@@ -12,7 +12,7 @@ import '@fontsource-variable/manrope';
 import './style.css';
 import './figma.css';
 
-const navLabels={en:['Find workers','Worker hub','Dashboard'],ur:['کاریگر ڈھونڈیں','کاریگر کا صفحہ','ڈیش بورڈ'],roman:['Karigar dhoondein','Kaam ka markaz','Mera dashboard']};
+const navLabels={en:['Find workers','Worker hub','Bookings & chat'],ur:['کاریگر ڈھونڈیں','کاریگر کا صفحہ','ڈیش بورڈ'],roman:['Karigar dhoondein','Kaam ka markaz','Bookings aur chat']};
 function Brand() {
   return <Link className="brand" to="/" aria-label="Roshan Rozgar home"><span className="brand-icon"><AudioLines size={23}/></span><span>Roshan <b>Rozgar</b><small lang="ur">روشن روزگار</small></span></Link>;
 }

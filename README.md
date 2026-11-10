@@ -1,78 +1,75 @@
 # Roshan Rozgar · روشن روزگار
 
-**Bolo, Kaam Ho Gaya.** A voice-first, hyperlocal skilled-worker marketplace for Islamabad and Rawalpindi. Built for COMSATS AI Web Forge, 10 November 2026.
+**Bolo, Kaam Ho Gaya.** A voice-first, hyperlocal skilled-worker marketplace for Islamabad and Rawalpindi. Built for COMSATS AI Web Forge.
 
-## Run the demo
+## Run on Windows with MongoDB Atlas
 
-Install **Node.js 24 LTS** and open a terminal in the extracted project folder.
+1. Install Node.js 24. In Atlas, create or select a cluster, create a database user with read/write access to `roshan_rozgar`, and add the IP address of the computer or host that will run the app to your project IP access list. In **Connect → Drivers**, copy the connection string and insert your database user password. URL-encode reserved characters in the password.
+2. Extract the project and open Command Prompt in `roshan-rozgar`.
 
-```sh
-npm ci
-npm run build
-npm start
+```cmd
+copy backend\.env.example backend\.env
+notepad backend\.env
 ```
 
-Open [http://localhost:3001](http://localhost:3001). Express serves both the built React app and the REST API on that port. SQLite initializes automatically. For development, run `npm run dev` and open [http://127.0.0.1:5173](http://127.0.0.1:5173). The Vite dev proxy expects the API on port 3001. Restart the development command after changing backend files.
+3. Replace the `MONGODB_URI` line with your Atlas connection string, keep `MONGODB_DB=roshan_rozgar`, and save. `GEMINI_API_KEY` is optional. Keep the connection string and API key in `backend/.env`.
+4. Run these commands from the project root.
 
-To reseed the database for another demo, stop the server and run `npm run db:reset`, then start it again. Reset deletes demo changes including new profiles, requests, messages, photos, and reviews. The application never resets on startup or on role change.
+```cmd
+npm.cmd ci
+npm.cmd run build
+npm.cmd start
+```
 
-## Enable Gemini
+Open [http://localhost:3001](http://localhost:3001). [The health endpoint](http://localhost:3001/api/health) returns `"database":"mongodb"` when the database responds. The first startup creates indexes and seeds fictional accounts, workers, bookings, messages, ratings, a sample evidence image, and a pending extra-work request.
 
-1. Copy `backend/.env.example` to `backend/.env`.
-2. Create a key in [Google AI Studio](https://aistudio.google.com/apikey), then set `GEMINI_API_KEY` in that file.
-3. Restart the server. Run an extraction and look for **Extracted with Gemini** or **Understood with Gemini** on the result.
+[MongoDB Atlas connection guide](https://www.mongodb.com/docs/atlas/connect-to-database-deployment/)
 
-`GEMINI_MODEL` defaults to `gemini-3.5-flash-lite`. Change it to a supported structured-output model available to your Google account if needed. The SDK runs only in Express, with schema-constrained JSON and runtime Zod validation. Extracted fields remain editable. Requests fall back to clearly labeled local pattern matching if the key is missing, the service times out, the quota is exceeded, or the model response fails validation. Gemini receives the natural-language description when configured. Use fictional details during the demo.
+### Run with a local replica set
 
-Browser speech recognition needs a compatible browser, a secure context (HTTPS or localhost), and microphone permission. Support for Urdu recognition and speech synthesis varies by browser, device and installed voices. The browser speech provider may process audio remotely. Roshan Rozgar itself stores no microphone recordings. Urdu, Roman Urdu and English text work even if dictation is unavailable. The language switch changes selected navigation, home, and onboarding labels.
+Use a local MongoDB replica set if you want a demo without relying on venue internet. The app requires a replica set or Atlas because booking confirmation uses transactions. If Docker Desktop is available, run the following in Command Prompt:
+
+```cmd
+docker run -d --name roshan-mongo -p 127.0.0.1:27017:27017 -v roshan-mongo-data:/data/db mongo:7.0 --replSet rs0 --bind_ip_all
+docker exec roshan-mongo mongosh --quiet --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+```
+
+Wait for the replica to elect a primary, then use the default URI in `backend/.env.example`. Keep this Docker configuration on your own machine. The port is bound to loopback and the container is for local demo data. To restart an existing container, run `docker start roshan-mongo`.
+
+For frontend development, use `npm run dev`. Vite runs on port 5173 and proxies API requests to port 3001. For a hosted demo, build the project and run `npm start` on a Node 24 host with `MONGODB_URI`, `MONGODB_DB`, and optionally `GEMINI_API_KEY` set as server secrets. The app serves the frontend and API on one origin. Use HTTPS for browser dictation.
+
+### Reset a demo database
+
+Stop the app. Double-check the configured database is dedicated to the demo, then run `npm run db:reset -- --confirm-demo-reset`. This replaces data in the app's MongoDB collections. Existing SQLite data is separate and is not imported automatically.
 
 ## Judge demo
 
-1. Start as **New demo worker**. Open **Bolo Profile**, use the sample or dictate it, and build the profile. The example describes Usman Ali, an electrician with 12 years of experience in Satellite Town, Rawalpindi. Confirm the suggested fields, optionally enter Rs. 1,200 as the indicative rate, and save with availability on.
-2. Open **Find workers** as the customer. Enter “Mera fan kharab hai, electrician chahiye jo aaj aa sakay.” Run **Understand my job**. Show the location follow-up, then choose **Rawalpindi → Satellite Town**. Choose Usman and send the request.
-3. On the agreement, **Switch to worker view**. Tap **Main available hoon.** Then select **Propose new terms**, tap the Rs. 1,500 preset, and send the counteroffer. Switch back to the customer and confirm the updated agreement.
-4. Show the booking confirmation and the reserved slot on the worker dashboard. The same time range will no longer return Usman in discovery with **Free for this slot** enabled.
-5. In the customer view, confirm completion and submit a rating. Open the worker profile to show the review and updated job count. The worker can also attach a JPEG, PNG, or WebP up to 1 MB. Use a fictional work photo.
+**Pehle Poochho (ask first):** Use the default **Customer · Ayesha Khan**. Go to **Bookings & chat → Confirmed bookings → Ceiling fan repair**. A fictional Rs. 450 capacitor replacement is awaiting approval on a Rs. 1,500 job. Decline it and show that the agreed total remains Rs. 1,500. Switch to the worker view, request a different extra, switch back, and approve it. Both roles see the same decision and revised total. The original agreement stays visible.
 
-The customer can mark completion immediately so the full flow fits the live pitch. The demo does not wait for wall-clock job completion.
+**Full journey:**
 
-## Implementation
+1. Choose **New demo worker** and start Bolo Profile. Use the example, review the extracted fields, enter Rs. 1,200 if desired, and save the profile with availability on.
+2. Switch to the customer and enter “Mera fan kharab hai, electrician chahiye jo aaj aa sakay.” Choose **Rawalpindi → Satellite Town** and request the new worker, Usman Ali.
+3. Open the booking. Use a Roman Urdu quick reply and a price counteroffer from the worker view. Accept it from the customer view.
+4. In the confirmed booking, the worker can preview and upload a JPEG, PNG, or WebP up to 1 MB. The customer can approve or decline any pending extra, confirm completion, and submit a review.
+5. Show the rating update on the worker profile. To show cancellation or decline, create another request and use its confirmation dialog. To show no matches, set the minimum experience above the local workers' experience.
 
-| Outcome | Implementation |
+## Backend and database
+
+| Collection | Data |
 | --- | --- |
-| Onboarding | Speech or text → Gemini or local parser → editable profile → persistent worker and skill rows |
-| Discovery | Trade, city, locality, selected time interval, accepting status, experience, and rating filters |
-| Communication | Persisted messages, tap-to-send replies, optional browser dictation, and structured counteroffers |
-| Booking | Either party can propose, only the other can accept. SQLite `BEGIN IMMEDIATE` serializes overlap checks and writes. An agreement version prevents acceptance of stale terms. |
-| Trust | Customer-confirmed completion, one review per booking, profile rating derived from reviews, optional work-photo evidence |
+| `users` | Fictional customer and worker accounts, profile, skills, service area, prices, availability and calendar revision |
+| `requests` | Customer repair descriptions, urgency, trade and locality |
+| `bookings` | Versioned terms, participants, status, reviews, evidence and extra-work decisions |
+| `messages` | Booking conversations, sender and timestamp |
+| `counters`, `meta` | API ID sequences and seed state |
 
-Time intervals are half-open. Back-to-back bookings are allowed, while confirmed intervals that overlap for a worker are rejected. Display and entry use Pakistan time. Availability is derived from the worker’s accepting flag and confirmed slots, so cancelling or completing a booking releases its reservation. Matching reasons come from actual search criteria. Search uses city/locality rather than estimated distance because the demo has no coordinates.
+The server validates requests with Zod. A unique partial index prevents two active bookings for one request. Booking confirmations for a worker write the same calendar revision inside a MongoDB transaction before checking for overlapping slots, so concurrent confirmations cannot both reserve the same time. Proposal versions reject stale acceptance. Ratings are calculated from completed bookings. Extra-work decisions are atomically applied to the booking, and only approved extras contribute to the current total.
 
-### Source layout
+`npm test` runs the REST integration test against a temporary MongoDB replica set. The first run may download a MongoDB binary. Set `MONGODB_TEST_URI` if you already have a test replica set. The test creates and drops its own temporary database. Run it against a test cluster only.
 
-- `frontend/` — React, Vite, Tailwind CSS, Lucide icons, React Router, voice input and both demo dashboards
-- `backend/app.js` — Express REST endpoints and demo access checks
-- `backend/domain.js` — validation, shared server-side domain constraints and errors
-- `backend/market.js` — profile persistence, matching, negotiation and booking transitions
-- `backend/ai.js` — Gemini SDK and deterministic extraction fallback
-- `backend/schema.sql`, `db.js`, `reset.js` — SQLite schema, fictional data and reset
+## Gemini, voice and demo scope
 
-`npm test` exercises onboarding, local extraction, slot discovery, proposal versions, messages, overlap prevention, review gates, evidence upload, rating updates and availability using the actual REST API. The test uses an isolated in-memory SQLite database.
+Copy `backend/.env.example` to `backend/.env` if needed. Set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) and restart to enable Gemini. The UI labels Gemini output and local fallback separately. Dictation uses browser Web Speech APIs and depends on browser permissions and language support. Text entry remains available. All seeded profiles, bookings and reviews are fictional. The sample evidence is a labeled illustration.
 
-## Hosting and submission
-
-The official brief accepts a working local demo. For hosted demo use a Node 24 server/container with a persistent volume and one Express instance. Set `DB_PATH` to an absolute path on the volume, set `PORT` as required by the host, and add `GEMINI_API_KEY` as a server secret. Build with `npm ci && npm run build`, start with `npm start`, and serve via HTTPS if you want microphone access. Static-only hosting cannot run the Express and SQLite backend.
-
-The role switcher intentionally lets visitors act as fictional demo users. If hosting, restrict access at the host or reverse proxy and share the demo only with intended testers. This is not an authentication system for real users. A production launch would require real sign-in, access control, moderation and data protection. Payment processing and formal identity verification are outside the demo. Availability across separate devices can be reloaded with **Refresh**. The app has no payment, SMS, or push notification integration.
-
-For the required public source submission, put this folder in the team’s Git repository after the team has reviewed, understood, and meaningfully integrated the generated implementation. Commit the source and lockfile. The provided ignore rules exclude the API key, local database, and build files. Use the working local demo or your own deployment during judging.
-
-## Simulation and AI disclosure
-
-All workers, customers, reviews, and historical jobs in the seed are fictional. No private dataset or external marketplace was imported. New profiles, requests, messages, agreements, photos, and ratings created during the demo are real SQLite writes against this fictional dataset. “Customer feedback” is a record of a completed demo job, not a formal verification claim.
-
-**AI services used by the product:** Google Gemini via `@google/genai` for structured worker/profile and job extraction when configured. Browser Web Speech APIs for optional speech recognition and instructions. Search and booking logic are deterministic.
-
-**AI development assistance:** OpenAI ChatGPT/Codex generated the initial implementation, interface, and tests during the hackathon session. The team should add its own contributions and tool disclosures after reviewing and integrating the project. No project-specific starter or prior marketplace repository was used.
-
-**References:** [Gemini structured output](https://ai.google.dev/gemini-api/docs/structured-output) · [Gemini model lifecycle](https://ai.google.dev/gemini-api/docs/deprecations) · [Node SQLite](https://nodejs.org/api/sqlite.html)
+The role selector is for a controlled hackathon demo. Real accounts and production authentication are out of scope. The demo allows completion without waiting for the scheduled visit, and availability and chat can be refreshed when switching devices. Protect any hosted demo at the hosting layer. The generated implementation was built with ChatGPT/Codex assistance.

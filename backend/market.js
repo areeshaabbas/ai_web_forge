@@ -1,145 +1,225 @@
-import { transaction } from './db.js';
+import { randomUUID } from 'node:crypto';
+import { nextId, transaction } from './db.js';
 import { requireThat as check } from './domain.js';
 
-const cardQuery = `SELECT w.*,u.name,a.accepting,
-  (SELECT ROUND(AVG(r.rating),1) FROM reviews r JOIN bookings b ON b.id=r.bookingId WHERE b.workerId=w.id) rating,
-  (SELECT COUNT(*) FROM reviews r JOIN bookings b ON b.id=r.bookingId WHERE b.workerId=w.id) reviewCount,
-  (SELECT COUNT(*) FROM bookings b WHERE b.workerId=w.id AND b.status='COMPLETED') completedJobs,
-  (SELECT json_group_array(name) FROM skills WHERE workerId=w.id) skillsJson
-  FROM workers w JOIN users u ON u.id=w.id JOIN availability a ON a.workerId=w.id`;
-const overlap = `SELECT startsAt,endsAt FROM bookings WHERE workerId=? AND status='CONFIRMED'
- AND startsAt < ? AND endsAt > ? AND id<>? ORDER BY startsAt`;
-const bookingQuery = `SELECT b.*,s.customerId,s.trade,s.city,s.locality,u.name workerName,c.name customerName,
- EXISTS(SELECT 1 FROM reviews WHERE bookingId=b.id) reviewed,
- EXISTS(SELECT 1 FROM work_evidence WHERE bookingId=b.id) hasEvidence
- FROM bookings b JOIN service_requests s ON s.id=b.requestId JOIN users u ON u.id=b.workerId JOIN users c ON c.id=s.customerId`;
-export function marketplace(db, now = () => new Date()) {
-  const conflicts = db.prepare(overlap);
-  const blocked = (id, startsAt, endsAt, skip = 0) => conflicts.all(id,endsAt,startsAt,skip);
-  const card = (row, filters = {}) => {
-    const instant = now();
-    const start = filters.startsAt ?? instant.toISOString();
-    const end = filters.endsAt ?? new Date(+instant + 1).toISOString();
-    const available = Boolean(row.accepting && !blocked(row.id,start,end).length);
-    const match = [];
-    if (filters.trade) match.push(filters.trade);
-    if (filters.locality) match.push('Same locality');
-    else if (filters.city) match.push('Same city');
-    if (available) match.push(filters.startsAt ? 'Free for your slot' : 'Free now');
-    const {skillsJson, ...rest} = row;
-    return {...rest, skills:JSON.parse(skillsJson), available, match};
-  };
-  function worker(id) {
-    const row = db.prepare(cardQuery + ' WHERE w.id=?').get(id);
+const openStates=['REQUESTED','NEGOTIATING'];
+const chatStates=[...openStates,'CONFIRMED'];
+const publicId=({_id,...rest})=>({id:_id,...rest});
+const bookingProjection={ 'evidence.photo':0, activity:0, active:0 };
+const bookingView=row=>{
+  const {review,evidence,active,addons=[],...rest}=publicId(row);
+  return {...rest,addons,reviewed:Number(Boolean(review)),hasEvidence:Number(Boolean(evidence)),
+    agreedTotal:row.price+addons.reduce((sum,item)=>sum+(item.status==='APPROVED'?item.amount:0),0)};
+};
+
+export function marketplace(store,now=()=>new Date()) {
+  const {db}=store;
+  const users=db.collection('users');
+  const requests=db.collection('requests');
+  const bookings=db.collection('bookings');
+  const messages=db.collection('messages');
+  const stamp=()=>now().toISOString();
+  const workerFilter=id=>({_id:id,role:'worker',profile:{$exists:true}});
+  const own=(id,actor)=>({_id:id,[actor.role==='worker'?'workerId':'customerId']:actor.id});
+  const overlaps=(ids,start,end,skip=0)=>({workerId:{$in:ids},status:'CONFIRMED',startsAt:{$lt:end},endsAt:{$gt:start},_id:{$ne:skip}});
+  async function blocked(id,start,end,session,skip=0) {
+    return bookings.find(overlaps([id],start,end,skip),{session,projection:{_id:0,startsAt:1,endsAt:1}}).sort({startsAt:1}).toArray();
+  }
+  async function cards(rows,filters={}) {
+    if (!rows.length) return [];
+    const ids=rows.map(row=>row._id);
+    const instant=now();
+    const start=filters.startsAt??instant.toISOString();
+    const end=filters.endsAt??new Date(+instant+1).toISOString();
+    const [busy,history]=await Promise.all([
+      bookings.distinct('workerId',overlaps(ids,start,end)),
+      bookings.aggregate([
+        {$match:{workerId:{$in:ids},status:'COMPLETED'}},
+        {$group:{_id:'$workerId',rating:{$avg:'$review.rating'},reviewCount:{$sum:{$cond:[{$ifNull:['$review.rating',false]},1,0]}},completedJobs:{$sum:1}}}
+      ]).toArray()
+    ]);
+    const histories=new Map(history.map(row=>[row._id,row]));
+    const occupied=new Set(busy);
+    return rows.map(row=>{
+      const available=Boolean(row.profile.accepting&&!occupied.has(row._id));
+      const stats=histories.get(row._id);
+      const match=[];
+      if(filters.trade) match.push(filters.trade);
+      if(filters.locality) match.push('Same locality');
+      else if(filters.city) match.push('Same city');
+      if(available) match.push(filters.startsAt?'Free for your slot':'Free now');
+      return {id:row._id,name:row.name,...row.profile,available,match,rating:stats?.rating==null?null:Math.round(stats.rating*10)/10,
+        reviewCount:stats?.reviewCount??0,completedJobs:stats?.completedJobs??0};
+    });
+  }
+  async function worker(id) {
+    const row=await users.findOne(workerFilter(id));
     check(row,404,'Worker profile not found.');
-    return card(row);
+    return (await cards([row]))[0];
   }
-  function search(filters) {
-    const conditions = [];
-    const params = [];
-    for (const field of ['trade','city','locality']) {
-      if (!filters[field]) continue;
-      conditions.push('w.' + field + ' = ? COLLATE NOCASE');
-      params.push(filters[field]);
-    }
-    if (filters.minExperience) {
-      conditions.push('w.experienceYears >= ?');
-      params.push(filters.minExperience);
-    }
-    const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
-    return db.prepare(cardQuery + where).all(...params).map(row => card(row,filters))
-      .filter(row => (!filters.available || row.available) && (!filters.minRating || row.rating >= filters.minRating))
-      .sort((a,b) => Number(b.available)-Number(a.available) || (b.rating ?? 0)-(a.rating ?? 0) || b.experienceYears-a.experienceYears || a.id-b.id);
+  async function search(filters) {
+    const query={role:'worker',profile:{$exists:true}};
+    for (const field of ['trade','city','locality']) if(filters[field]) query['profile.'+field]=filters[field];
+    if(filters.minExperience) query['profile.experienceYears']={$gte:filters.minExperience};
+    const rows=await users.find(query,{collation:{locale:'en',strength:2}}).toArray();
+    return (await cards(rows,filters))
+      .filter(row=>(!filters.available||row.available)&&(!filters.minRating||row.rating>=filters.minRating))
+      .sort((a,b)=>Number(b.available)-Number(a.available)||(b.rating??0)-(a.rating??0)||b.experienceYears-a.experienceYears||a.id-b.id);
   }
-  function saveWorker(id, data, create) {
-    transaction(db, () => {
-      const exists = db.prepare('SELECT id FROM workers WHERE id=?').get(id);
-      check(create ? !exists : exists,create ? 409 : 404,create ? 'This profile already exists. Edit it from Worker hub.' : 'Worker profile not found.');
-      db.prepare('UPDATE users SET name=? WHERE id=?').run(data.name,id);
-      db.prepare(`INSERT INTO workers(id,trade,experienceYears,city,locality,price) VALUES(?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET trade=excluded.trade, experienceYears=excluded.experienceYears, city=excluded.city, locality=excluded.locality, price=excluded.price`)
-        .run(id,data.trade,data.experienceYears,data.city,data.locality,data.price);
-      db.prepare('INSERT INTO availability VALUES(?,?) ON CONFLICT(workerId) DO UPDATE SET accepting=excluded.accepting').run(id,Number(data.accepting));
-      db.prepare('DELETE FROM skills WHERE workerId=?').run(id);
-      const add = db.prepare('INSERT OR IGNORE INTO skills VALUES(?,?)');
-      data.skills.forEach(skill => add.run(id,skill));
+  async function saveWorker(id,data,create) {
+    await transaction(store,async session=>{
+      const row=await users.findOne({_id:id,role:'worker'},{session});
+      check(row,404,'Worker account not found.');
+      check(create?!row.profile:row.profile,create?409:404,create?'This profile already exists. Edit it from Worker hub.':'Worker profile not found.');
+      const {name,skills,...fields}=data;
+      const unique=[...new Map(skills.map(skill=>[skill.toLowerCase(),skill])).values()];
+      await users.updateOne({_id:id},{$set:{name,profile:{...fields,skills:unique,seeded:row.profile?.seeded??0,createdAt:row.profile?.createdAt??stamp()}}},{session});
+      if(name!==row.name) {
+        await bookings.updateMany({workerId:id},{$set:{workerName:name}},{session});
+        await messages.updateMany({senderId:id},{$set:{senderName:name}},{session});
+      }
     });
     return worker(id);
   }
-  function reviews(id) {
-    worker(id);
-    return db.prepare(`SELECT r.*,u.name customerName,b.seeded,EXISTS(SELECT 1 FROM work_evidence WHERE bookingId=b.id) hasEvidence
-      FROM reviews r JOIN bookings b ON b.id=r.bookingId JOIN service_requests s ON s.id=b.requestId
-      JOIN users u ON u.id=s.customerId WHERE b.workerId=? ORDER BY r.createdAt DESC,b.id DESC`).all(id);
+  async function setAvailability(id,accepting) {
+    const update=await users.updateOne(workerFilter(id),{$set:{'profile.accepting':accepting}});
+    check(update.matchedCount,404,'Worker profile not found.');
+    return worker(id);
   }
-  function getBooking(id, actor) {
-    const row = db.prepare(bookingQuery+' WHERE b.id=?').get(id);
-    check(row && (actor.role==='worker' ? row.workerId===actor.id : row.customerId===actor.id),404,'Booking not found for this demo role.');
-    return row;
+  async function reviews(id) {
+    check(await users.findOne(workerFilter(id)),404,'Worker profile not found.');
+    const rows=await bookings.find({workerId:id,review:{$exists:true}},{projection:bookingProjection}).sort({'review.createdAt':-1,_id:-1}).toArray();
+    return rows.map(row=>({bookingId:row._id,...row.review,customerName:row.customerName,seeded:row.seeded,hasEvidence:Number(Boolean(row.evidence))}));
   }
-  function listBookings(actor) {
-    const owner = actor.role==='worker' ? 'b.workerId' : 's.customerId';
-    return db.prepare(bookingQuery+' WHERE '+owner+'=? ORDER BY b.id DESC').all(actor.id);
+  async function getBooking(id,actor,session) {
+    const row=await bookings.findOne(own(id,actor),{session,projection:bookingProjection});
+    check(row,404,'Booking not found for this demo role.');
+    return bookingView(row);
   }
-  function free(workerId, data, id) {
-    const w = worker(workerId);
-    check(w.accepting,409,'This worker has paused new jobs.');
-    check(!blocked(workerId,data.startsAt,data.endsAt,id).length,409,'That time overlaps a confirmed booking. Propose another slot.');
+  async function listBookings(actor) {
+    return (await bookings.find({[actor.role==='worker'?'workerId':'customerId']:actor.id},{projection:bookingProjection}).sort({_id:-1}).toArray()).map(bookingView);
   }
-  function createBooking(actor, data) {
-    return transaction(db, () => {
-      const job = db.prepare('SELECT * FROM service_requests WHERE id=? AND customerId=?').get(data.requestId,actor.id);
-      check(job,404,'Service request not found.');
-      check(data.startsAt >= now().toISOString(),422,'Choose a future start time.');
-      const w = worker(data.workerId);
-      check(w.trade===job.trade && w.city===job.city,422,'Choose a worker who matches the trade and city.');
-      free(data.workerId,data);
-      check(!db.prepare("SELECT 1 FROM bookings WHERE requestId=? AND status NOT IN ('CANCELLED','REJECTED')").get(job.id),409,'This service request already has a booking.');
-      const row = db.prepare(`INSERT INTO bookings(requestId,workerId,description,price,startsAt,endsAt,location,status,proposedBy)
-        VALUES(?,?,?,?,?,?,?,'REQUESTED','customer')`).run(data.requestId,data.workerId,data.description,data.price,data.startsAt,data.endsAt,data.location);
-      return getBooking(Number(row.lastInsertRowid),actor);
-    });
+  async function free(workerId,data,session,skip) {
+    const worker=await users.findOne(workerFilter(workerId),{session});
+    check(worker?.profile.accepting,409,'This worker has paused new jobs.');
+    check(!(await blocked(workerId,data.startsAt,data.endsAt,session,skip)).length,409,'That time overlaps a confirmed booking. Propose another slot.');
+    return worker;
   }
-  function updateBooking(id, actor, input) {
-    return transaction(db, () => {
-      const row = getBooking(id,actor);
+  async function createRequest(actor,data) {
+    const row={_id:await nextId(db,'requests'),customerId:actor.id,...data,seeded:0,createdAt:stamp()};
+    await requests.insertOne(row);
+    return publicId(row);
+  }
+  async function listRequests(actor) {
+    return (await requests.find({customerId:actor.id}).sort({_id:-1}).toArray()).map(publicId);
+  }
+  async function createBooking(actor,data) {
+    try {
+      return await transaction(store,async session=>{
+        const job=await requests.findOne({_id:data.requestId,customerId:actor.id},{session});
+        check(job,404,'Service request not found.');
+        check(data.startsAt>=stamp(),422,'Choose a future start time.');
+        const worker=await free(data.workerId,data,session);
+        check(worker.profile.trade===job.trade&&worker.profile.city===job.city,422,'Choose a worker who matches the trade and city.');
+        const row={_id:await nextId(db,'bookings',session),...data,customerId:actor.id,customerName:actor.name,workerName:worker.name,
+          trade:job.trade,city:job.city,locality:job.locality,status:'REQUESTED',active:true,proposedBy:'customer',version:1,seeded:0,createdAt:stamp(),addons:[]};
+        await bookings.insertOne(row,{session});
+        return bookingView(row);
+      });
+    } catch(error) {
+      if(error.code===11000) check(false,409,'This service request already has a booking.');
+      throw error;
+    }
+  }
+  async function updateBooking(id,actor,input) {
+    return transaction(store,async session=>{
+      const row=await getBooking(id,actor,session);
       check(row.version===input.version,409,'The agreement changed. Refresh to see the latest terms.');
-      const open = ['REQUESTED','NEGOTIATING'].includes(row.status);
-      const timestamp = now().toISOString();
-      let status;
-      let data = row;
-      let proposedBy = row.proposedBy;
-      switch (input.action) {
+      const open=openStates.includes(row.status);
+      let updates;
+      switch(input.action) {
         case 'propose':
           check(open,409,'This agreement is closed to new proposals.');
-          data = input.terms;
-          check(data.startsAt >= timestamp,422,'Choose a future start time.');
-          proposedBy = actor.role;
-          status = 'NEGOTIATING';
+          check(input.terms.startsAt>=stamp(),422,'Choose a future start time.');
+          updates={...input.terms,proposedBy:actor.role,status:'NEGOTIATING'};
           break;
         case 'confirm':
-          check(open && actor.role!==row.proposedBy,409,'The other party must accept the latest terms.');
-          check(row.startsAt >= timestamp,409,'The proposed start time passed. Propose another time.');
-          free(row.workerId,row,id);
-          status = 'CONFIRMED';
+          check(open&&actor.role!==row.proposedBy,409,'The other party must accept the latest terms.');
+          check(row.startsAt>=stamp(),409,'The proposed start time passed. Propose another time.');
+          // Every confirmation writes the worker document first. Competing transactions retry on the same worker.
+          await users.updateOne(workerFilter(row.workerId),{$inc:{calendarRevision:1}},{session});
+          await free(row.workerId,row,session,id);
+          updates={status:'CONFIRMED'};
           break;
         case 'complete':
-          check(actor.role==='customer' && row.status==='CONFIRMED',409,'Only the customer can confirm completion of a booked job.');
-          status = 'COMPLETED';
+          check(actor.role==='customer'&&row.status==='CONFIRMED',409,'Only the customer can confirm completion of a booked job.');
+          check(!row.addons.some(item=>item.status==='PENDING'),409,'Approve or decline the extra work before completing the job.');
+          updates={status:'COMPLETED'};
           break;
         case 'reject':
-          check(actor.role==='worker' && open,409,'Only the worker can decline an open request.');
-          status = 'REJECTED';
+          check(actor.role==='worker'&&open,409,'Only the worker can decline an open request.');
+          updates={status:'REJECTED',active:false};
           break;
         case 'cancel':
-          check(open || row.status==='CONFIRMED',409,'This booking is already closed.');
-          status = 'CANCELLED';
+          check(chatStates.includes(row.status),409,'This booking is already closed.');
+          updates={status:'CANCELLED',active:false,addons:row.addons.map(item=>item.status==='PENDING'?{...item,status:'WITHDRAWN',decidedAt:stamp()}:item)};
           break;
       }
-      db.prepare('UPDATE bookings SET description=?,price=?,startsAt=?,endsAt=?,location=?,status=?,proposedBy=?,version=version+1 WHERE id=?')
-        .run(data.description,data.price,data.startsAt,data.endsAt,data.location,status,proposedBy,id);
-      return getBooking(id,actor);
+      const updated=await bookings.findOneAndUpdate(own(id,actor),{$set:updates,$inc:{version:1}},{session,returnDocument:'after',projection:bookingProjection});
+      return bookingView(updated);
     });
   }
-  return {worker,search,saveWorker,reviews,getBooking,listBookings,createBooking,updateBooking,blocked};
+  async function listMessages(id,actor) {
+    await getBooking(id,actor);
+    return (await messages.find({bookingId:id}).sort({_id:1}).toArray()).map(publicId);
+  }
+  async function sendMessage(id,actor,body) {
+    return transaction(store,async session=>{
+      const booking=await getBooking(id,actor,session);
+      check(chatStates.includes(booking.status),409,'Messaging is closed for this job.');
+      await bookings.updateOne(own(id,actor),{$inc:{activity:1}},{session});
+      const row={_id:await nextId(db,'messages',session),bookingId:id,senderId:actor.id,senderName:actor.name,body,createdAt:stamp()};
+      await messages.insertOne(row,{session});
+      return publicId(row);
+    });
+  }
+  async function addReview(actor,{bookingId,rating,feedback}) {
+    const row=await getBooking(bookingId,actor);
+    check(row.status==='COMPLETED',409,'Complete the job before adding a review.');
+    const review={rating,feedback,createdAt:stamp()};
+    const result=await bookings.updateOne({...own(bookingId,actor),status:'COMPLETED',review:{$exists:false}},{$set:{review}});
+    check(result.modifiedCount,409,'This booking already has a review.');
+    return {bookingId,...review};
+  }
+  async function saveEvidence(id,actor,evidence) {
+    await getBooking(id,actor);
+    const result=await bookings.updateOne({...own(id,actor),status:{$in:['CONFIRMED','COMPLETED']}},{$set:{evidence}});
+    check(result.matchedCount,409,'Only booked or completed jobs can have a work photo.');
+  }
+  async function getEvidence(id,actor) {
+    const query=actor?{_id:id,$or:[{status:'COMPLETED'},own(id,actor)]}:{_id:id,status:'COMPLETED'};
+    const row=await bookings.findOne({...query,evidence:{$exists:true}},{projection:{evidence:1}});
+    check(row,404,'Work photo not found.');
+    return {mime:row.evidence.mime,photo:Buffer.from(row.evidence.photo.value())};
+  }
+  async function proposeAddon(id,actor,data) {
+    const row=await getBooking(id,actor);
+    check(row.status==='CONFIRMED',409,'Extra work can only be proposed on a confirmed job.');
+    check(row.addons.length<30,409,'This booking has reached its extra-work limit.');
+    const addon={id:randomUUID(),...data,status:'PENDING',createdAt:stamp()};
+    const updated=await bookings.findOneAndUpdate({...own(id,actor),version:row.version,status:'CONFIRMED','addons.status':{$ne:'PENDING'}},
+      {$push:{addons:addon},$inc:{version:1}},{returnDocument:'after',projection:bookingProjection});
+    check(updated,409,'An extra is awaiting a decision or the booking changed. Refresh and try again.');
+    return bookingView(updated);
+  }
+  async function decideAddon(id,actor,addonId,status) {
+    const row=await getBooking(id,actor);
+    check(row.status==='CONFIRMED',409,'This booking is no longer open to extra work.');
+    const updated=await bookings.findOneAndUpdate({...own(id,actor),version:row.version,status:'CONFIRMED',addons:{$elemMatch:{id:addonId,status:'PENDING'}}},
+      {$set:{'addons.$.status':status,'addons.$.decidedAt':stamp()},$inc:{version:1}},{returnDocument:'after',projection:bookingProjection});
+    check(updated,409,'This extra is no longer awaiting a decision. Refresh to see the latest terms.');
+    return bookingView(updated);
+  }
+  return {worker,search,saveWorker,setAvailability,reviews,blocked,getBooking,listBookings,createBooking,updateBooking,
+    createRequest,listRequests,listMessages,sendMessage,addReview,saveEvidence,getEvidence,proposeAddon,decideAddon};
 }

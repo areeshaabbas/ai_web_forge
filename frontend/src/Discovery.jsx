@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ArrowRight, MapPin, Search, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowRight, CalendarDays, MapPin, Search, Sparkles } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { cities, ErrorNote, Field, initialSlot, Intro, localities, Options, pk, query, SlotFields, slotBody, trades, useDemo, useTask, VoiceInput, WorkerCard } from './ui';
 
@@ -19,7 +19,8 @@ export default function Discovery() {
   const [source,setSource]=useState('');
   const [selected,setSelected]=useState(null);
   const [terms,setTerms]=useState({price:'',location:''});
-  const [results,setResults]=useState('Loading workers…');
+  const [searchState,setSearchState]=useState('loading');
+  const slotFields=useRef(null);
   const [requestId,setRequestId]=useState(null);
   const task=useTask();
   const [searchError,setSearchError]=useState('');
@@ -49,13 +50,23 @@ export default function Discovery() {
     setSearchError('');
     let slot;
     try {slot=slotBody(time.start,time.end);}
-    catch(e) {setSearchError(e.message);setWorkers([]);setResults('Choose a valid time range to see matches.');return;}
+    catch(e) {setSearchError(e.message);setWorkers([]);setSearchState('error');return;}
     const filters={trade:job.trade,city:job.city,locality:expanded?'':job.locality,available:onlyFree,minRating,minExperience,...slot};
-    setResults('Checking worker availability…');
-    api('/workers?'+query(filters)).then(data=>{if(live){setWorkers(data);setResults(data.length===1?'1 matching worker':data.length+' matching workers');}})
-      .catch(e=>{if(live){setWorkers([]);setResults('Search unavailable');setSearchError(e.message);}});
+    setSearchState('loading');
+    api('/workers?'+query(filters)).then(data=>{
+      if (!live) return;
+      setWorkers(data);
+      setSelected(current=>current&&data.some(worker=>worker.id===current.id&&worker.available)?current:null);
+      setSearchState('ready');
+    }).catch(e=>{
+      if (!live) return;
+      setWorkers([]);
+      setSearchState('error');
+      setSearchError(e.message);
+    });
     return ()=>{live=false;};
   },[api,job.trade,job.city,job.locality,time.start,time.end,onlyFree,minRating,minExperience,expanded,refresh]);
+  const results=searchState==='loading'?'Checking worker availability…':searchState==='error'?'Search unavailable':workers.length===1?'1 matching worker':workers.length+' matching workers';
   function select(worker) {
     setSelected(worker);
     setTerms({price:worker.price??'',location:[job.locality,job.city].filter(Boolean).join(', ')});
@@ -96,7 +107,7 @@ export default function Discovery() {
       <Field label="Urgency"><Options values={['Today','Soon','Flexible']} value={job.urgency} placeholder="Choose timing" onChange={e=>set('urgency',e.target.value)}/></Field>
       <Field label="City"><Options values={cities} value={job.city} placeholder="Any city" onChange={e=>{setSelected(null);setExpanded(false);set('city',e.target.value);}}/></Field>
       <Field label="Locality"><Options values={[...new Set([...(localities[job.city]??[]),...(job.locality?[job.locality]:[])])]} value={job.locality} placeholder="Any locality" onChange={e=>{setExpanded(false);set('locality',e.target.value);}}/></Field></div>
-      <SlotFields start={time.start} end={time.end} onStart={start=>setTime(t=>({...t,start}))} onEnd={end=>setTime(t=>({...t,end}))}/>
+      <div ref={slotFields}><SlotFields start={time.start} end={time.end} onStart={start=>setTime(t=>({...t,start}))} onEnd={end=>setTime(t=>({...t,end}))}/></div>
     </section></div>
     <ErrorNote error={task.error}/>
     <section className="section results"><div className="section-head"><div><div className="eyebrow"><Search size={15}/> SMART DISCOVERY</div><h2>Good people. Right nearby.</h2><p aria-live="polite">{results}</p></div><button type="button" className="btn quiet" onClick={()=>setRefresh(r=>r+1)}>Refresh availability</button></div>
@@ -105,15 +116,25 @@ export default function Discovery() {
       <Options aria-label="Minimum experience" placeholder="Any experience" values={['5','10','15']} labels={{5:'5+ years',10:'10+ years',15:'15+ years'}} value={minExperience} onChange={e=>setMinExperience(e.target.value)}/>
       {job.locality&&<button className="btn quiet mini" type="button" onClick={()=>setExpanded(v=>!v)}>{expanded?'Search selected locality':'Expand to whole city'}</button>}</div>
       <ErrorNote error={searchError}/>
-      {!workers.length&&!searchError&&<p className="empty">Try another slot or expand your search area.</p>}
-      <div className="worker-grid">{[...workers].sort((a,b)=>Number(String(b.id)===params.get('worker'))-Number(String(a.id)===params.get('worker'))).map(w=><WorkerCard key={w.id} worker={w} chosen={selected?.id===w.id} onBook={user.role==='customer'?select:undefined}/>)}</div>
+      {searchState==='ready'&&!workers.length&&<section className="panel no-matches" aria-labelledby="no-matches-title">
+        <span className="avatar"><Search size={21}/></span>
+        <div><h3 id="no-matches-title">{onlyFree?'No workers free for this time':'No workers match these filters'}</h3>
+          <p>{job.locality&&!expanded?'Try a different time or look beyond '+job.locality+'.':'Try a different time or adjust your filters.'}</p>
+          <div className="actions">
+            <button type="button" className="btn primary" onClick={()=>slotFields.current?.querySelector('input')?.focus()}><CalendarDays size={17}/> Change time</button>
+            {job.locality&&!expanded&&<button type="button" className="btn outline" onClick={()=>setExpanded(true)}><MapPin size={17}/> Expand search area</button>}
+            {(minRating||minExperience)&&<button type="button" className="btn outline" onClick={()=>{setMinRating('');setMinExperience('');}}>Clear rating and experience filters</button>}
+          </div>
+        </div>
+      </section>}
+      <div className="worker-grid">{searchState==='ready'&&[...workers].sort((a,b)=>Number(String(b.id)===params.get('worker'))-Number(String(a.id)===params.get('worker'))).map(w=><WorkerCard key={w.id} worker={w} chosen={selected?.id===w.id} onBook={user.role==='customer'?select:undefined}/>)}</div>
     </section>
     {selected&&user.role==='customer'&&<form id="book-form" className="panel book-form" onSubmit={e=>{e.preventDefault();task.run(submitBooking);}}>
       <div className="section-head"><div><div className="eyebrow">PAKKI BAAT</div><h2>Request {selected.name}</h2><p>{job.problem||'Add the job description in the summary above.'} · {selected.price?pk(selected.price)+' indicative':'Discuss a price'}</p></div><button type="button" className="btn quiet" onClick={()=>setSelected(null)}>Clear selection</button></div>
       <div className="fields"><Field label="Your price offer in PKR"><input type="number" required min="100" max="1000000" value={terms.price} onChange={e=>setTerms(t=>({...t,price:e.target.value}))}/></Field>
       <Field label="Visit location"><input required maxLength={250} dir="auto" value={terms.location} onChange={e=>setTerms(t=>({...t,location:e.target.value}))}/></Field></div>
       <SlotFields start={time.start} end={time.end} onStart={start=>setTime(t=>({...t,start}))} onEnd={end=>setTime(t=>({...t,end}))}/>
-      <ErrorNote error={task.error}/><button className="btn primary" disabled={task.pending}>{task.pending?'Sending…':'Send booking request'} <ArrowRight size={18}/></button>
+      <ErrorNote error={task.error}/><button className="btn primary" disabled={task.pending||searchState!=='ready'}>{task.pending?'Sending…':'Send booking request'} <ArrowRight size={18}/></button>
     </form>}
     {user.role==='customer'&&<Link className="text-link" to="/dashboard">Go to my bookings <ArrowRight size={17}/></Link>}
   </div>;

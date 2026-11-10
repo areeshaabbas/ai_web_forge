@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { ArrowRight, BriefcaseBusiness, CalendarDays, Check, CircleCheck, Clock3, ImagePlus, MapPin, MessageCircle, RefreshCw, Star, Wallet } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowRight, BriefcaseBusiness, CalendarDays, Check, CircleCheck, Clock3, ImagePlus, MapPin, MessageCircle, RefreshCw, Star, Wallet, X } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import ExtraWork from './ExtraWork';
 import { ErrorNote, Field, Intro, Listen, pk, prettyTime, SlotFields, slotBody, toPK, useDemo, useTask, VoiceInput, WorkerCard } from './ui';
 
 const openStates=['REQUESTED','NEGOTIATING'];
@@ -57,7 +58,7 @@ export function Dashboard() {
 }
 function TermsSummary({booking}) {
   return <div className="terms-grid">
-    <div><Wallet size={19}/><span>Agreed / proposed price<strong>{pk(booking.price)}</strong></span></div>
+    <div><Wallet size={19}/><span>Original agreement<strong>{pk(booking.price)}</strong></span></div>
     <div><MapPin size={19}/><span>Visit location<strong>{booking.location}</strong></span></div>
     <div><CalendarDays size={19}/><span>Starts · Pakistan time<strong>{prettyTime(booking.startsAt)}</strong></span></div>
     <div><Clock3 size={19}/><span>Ends · Pakistan time<strong>{prettyTime(booking.endsAt)}</strong></span></div>
@@ -67,12 +68,12 @@ function Proposal({booking,onSave,pending,onCancel}) {
   const [form,setForm]=useState({description:booking.description,location:booking.location,price:booking.price,start:toPK(booking.startsAt),end:toPK(booking.endsAt)});
   const set=(key,value)=>setForm(f=>({...f,[key]:value}));
   return <form className="proposal" onSubmit={e=>{e.preventDefault();onSave(form);}}>
-    <h3>Propose new terms</h3>
+    <h3>Propose new terms</h3><p className="subtle">The other party must accept the new price and time before the booking is confirmed.</p>
     <Field label="Job description"><input required maxLength={500} value={form.description} onChange={e=>set('description',e.target.value)}/></Field>
     <div className="fields"><Field label="Offer in PKR"><input required min="100" max="1000000" type="number" value={form.price} onChange={e=>set('price',e.target.value)}/></Field><Field label="Visit location"><input required maxLength={250} value={form.location} onChange={e=>set('location',e.target.value)}/></Field></div>
     <div className="chips clickable">{[1000,1500,2000,2500].map(p=><button type="button" key={p} aria-pressed={Number(form.price)===p} onClick={()=>set('price',p)}>{pk(p)}</button>)}</div>
     <SlotFields start={form.start} end={form.end} onStart={v=>set('start',v)} onEnd={v=>set('end',v)}/>
-    <div className="actions"><button className="btn primary" disabled={pending}>Send counteroffer</button><button className="btn quiet" type="button" onClick={onCancel}>Close</button></div>
+    <div className="actions"><button className="btn primary" disabled={pending}>Send counteroffer</button><button className="btn quiet" type="button" onClick={onCancel}>Discard changes</button></div>
   </form>;
 }
 function WorkPhoto({id,completed,userId}) {
@@ -86,6 +87,63 @@ function WorkPhoto({id,completed,userId}) {
   },[id,completed,userId]);
   return (completed||url)&&<img className="work-photo" alt="Work evidence uploaded by the worker" src={completed?'/api/bookings/'+id+'/evidence':url}/>;
 }
+function CloseBookingDialog({kind,pending,error,onDismiss,onConfirm}) {
+  const dialog=useRef(null);
+  const decline=kind==='reject';
+  useEffect(()=>{dialog.current.showModal();},[]);
+  return <dialog ref={dialog} className="booking-dialog" aria-labelledby="close-booking-title" onCancel={event=>{
+    event.preventDefault();
+    if (!pending) onDismiss();
+  }}>
+    <div className="eyebrow">PAKKI BAAT</div>
+    <h2 id="close-booking-title">{decline?'Decline this request?':'Cancel this booking?'}</h2>
+    <p>{decline?'The customer will see the request as declined and can look for another worker.':'Both parties will see the booking as cancelled. A confirmed time slot will be released.'}</p>
+    <ErrorNote error={error}/>
+    <div className="actions">
+      <button type="button" className="btn outline" autoFocus disabled={pending} onClick={onDismiss}>{decline?'Keep request':'Keep booking'}</button>
+      <button type="button" className="btn primary" disabled={pending} onClick={onConfirm}>{pending?'Saving…':decline?'Decline request':'Cancel booking'}</button>
+    </div>
+  </dialog>;
+}
+
+function PhotoUpload({hasEvidence,pending,onUpload}) {
+  const [file,setFile]=useState(null);
+  const [preview,setPreview]=useState('');
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    if (!file) return;
+    const url=URL.createObjectURL(file);
+    setPreview(url);
+    return ()=>URL.revokeObjectURL(url);
+  },[file]);
+  function pick(event) {
+    const chosen=event.target.files?.[0];
+    event.target.value='';
+    if (!chosen) return;
+    if (!['image/jpeg','image/png','image/webp'].includes(chosen.type)||chosen.size>1000000) {
+      setError('Choose a JPEG, PNG or WebP under 1 MB.');
+      return;
+    }
+    setError('');
+    setFile(chosen);
+  }
+  return <div className="photo-upload">
+    <label className="upload"><ImagePlus size={19}/> {hasEvidence?'Choose a replacement photo':'Choose a work photo'}
+      <input aria-label="Choose a work photo" type="file" accept="image/jpeg,image/png,image/webp" disabled={pending} onChange={pick}/>
+    </label>
+    <small>JPEG, PNG or WebP · up to 1 MB</small>
+    <ErrorNote error={error}/>
+    {file&&<div className="photo-draft">
+      {preview&&<img className="work-photo" src={preview} alt="Preview of the selected work photo"/>}
+      <p>{file.name}</p>
+      <div className="actions">
+        <button className="btn primary" disabled={pending} onClick={async()=>{if(await onUpload(file)){setFile(null);setPreview('');}}}>{pending?'Uploading…':'Upload work photo'}</button>
+        <button className="btn quiet" disabled={pending} onClick={()=>{setFile(null);setPreview('');}}>Remove preview</button>
+      </div>
+    </div>}
+  </div>;
+}
+
 export function Booking() {
   const {id}=useParams();
   const {api,user,choose}=useDemo();
@@ -96,6 +154,9 @@ export function Booking() {
   const [rating,setRating]=useState(0);
   const [proposal,setProposal]=useState(false);
   const [notice,setNotice]=useState('');
+  const [closeAction,setCloseAction]=useState(null);
+  const [photoRevision,setPhotoRevision]=useState(0);
+  const chatLog=useRef(null);
   const task=useTask();
   const path='/bookings/'+id;
   async function load() {
@@ -103,10 +164,46 @@ export function Booking() {
     setBooking(row);setMessages(chat);
   }
   useEffect(()=>{task.run(load);},[api,id]);
+  useEffect(()=>{
+    const log=chatLog.current;
+    if (log) log.scrollTop=log.scrollHeight;
+  },[messages]);
+  function dismissClose() {
+    task.setError('');
+    setCloseAction(null);
+  }
+  function uploadPhoto(file) {
+    return task.run(async()=>{
+      const base64=await new Promise((resolve,reject)=>{
+        const reader=new FileReader();
+        reader.onload=()=>resolve(reader.result.split(',')[1]);
+        reader.onerror=()=>reject(new Error('Unable to read photo.'));
+        reader.readAsDataURL(file);
+      });
+      await api(path+'/evidence','PUT',{mime:file.type,base64});
+      setBooking(row=>({...row,hasEvidence:1}));
+      setPhotoRevision(n=>n+1);
+      setNotice('Work photo saved.');
+      return true;
+    });
+  }
   function action(action,extra={}) {
     return task.run(async()=>{
       const row=await api(path,'PATCH',{action,version:booking.version,...extra});
-      setBooking(row);setProposal(false);setNotice('');
+      setBooking(row);setProposal(false);setCloseAction(null);setNotice('');
+    });
+  }
+  function proposeExtra(data) {
+    return task.run(async()=>{
+      setBooking(await api(path+'/addons','POST',data));
+      setNotice('Extra work sent for approval. The agreed total stays the same.');
+      return true;
+    });
+  }
+  function decideExtra(id,status) {
+    return task.run(async()=>{
+      setBooking(await api(path+'/addons/'+id,'PATCH',{status}));
+      setNotice(status==='APPROVED'?'Extra approved. The agreed total has been updated.':'Extra declined. The agreed total stays the same.');
     });
   }
   function send(data) {
@@ -118,57 +215,71 @@ export function Booking() {
   }
   if (!booking) return <div className="container page"><Intro eyebrow="PAKKI BAAT" title="Booking agreement"/><ErrorNote error={task.error}/>{task.pending&&<p role="status">Loading agreement…</p>}<Link className="btn outline" to="/dashboard">Back to dashboard</Link></div>;
   const open=openStates.includes(booking.status);
-  const canChat=open||booking.status==='CONFIRMED';
+  const confirmed=booking.status==='CONFIRMED';
+  const completed=booking.status==='COMPLETED';
+  const closed=['CANCELLED','REJECTED'].includes(booking.status);
+  const canChat=open||confirmed;
   const canConfirm=open&&booking.proposedBy!==user.role;
+  const pendingExtra=booking.addons?.some(item=>item.status==='PENDING');
   const canPhoto=user.role==='worker'&&['CONFIRMED','COMPLETED'].includes(booking.status);
   const canReview=user.role==='customer'&&booking.status==='COMPLETED'&&!booking.reviewed;
   const actorId=user.role==='worker'?booking.customerId:booking.workerId;
+  const conversation=<div className="messages" ref={chatLog} role="log" aria-label="Job messages">
+    {messages.length?messages.map(m=><div key={m.id} className={'message '+(m.senderId===user.id?'mine':'')}><small>{m.senderName}</small><span dir="auto">{m.body}</span></div>):<p className="subtle">No messages yet.</p>}
+  </div>;
   return <div className="container page">
     <Link className="text-link" to="/dashboard">← Back to dashboard</Link>
-    <Intro eyebrow="03–04 / PAKKI BAAT" title={booking.status==='CONFIRMED'?<>One less thing<br/>to worry about.</>:booking.status==='COMPLETED'?'How did the job go?':<>A fair price.<br/>A clear plan.</>} description={booking.description+' · '+booking.workerName+' with '+booking.customerName+' · Booking #'+booking.id} icon={MessageCircle}/>
+    <Intro eyebrow="03–04 / PAKKI BAAT" title={closed?(booking.status==='REJECTED'?'Request declined.':'Booking cancelled.'):confirmed?<>One less thing<br/>to worry about.</>:completed?'How did the job go?':<>A fair price.<br/>A clear plan.</>} description={booking.description+' · '+booking.workerName+' with '+booking.customerName+' · Booking #'+booking.id} icon={MessageCircle}/>
     <div className="dashboard-actions"><Status status={booking.status}/><button className="btn quiet mini" disabled={task.pending} onClick={()=>task.run(load)}><RefreshCw size={16}/> Refresh</button><button className="btn outline mini" onClick={()=>choose(actorId)}>Switch to {user.role==='worker'?'customer':'worker'} view <ArrowRight size={16}/></button></div>
-    <ErrorNote error={task.error}/>{notice&&<p className="callout" role="status"><Check size={16}/> {notice}</p>}
-    <div className="discover-layout booking-layout">
+    {!closeAction&&<ErrorNote error={task.error}/>}
+    {closeAction&&<CloseBookingDialog kind={closeAction} pending={task.pending} error={task.error} onDismiss={dismissClose} onConfirm={()=>action(closeAction)}/>}
+    {notice&&<p className="callout" role="status"><Check size={16}/> {notice}</p>}
+    <div className={'discover-layout booking-layout'+(confirmed||completed?' with-evidence':'')}>
       <section className={'panel agreement '+(booking.status==='CONFIRMED'?'confirmed':'')}>
         <div className="section-head"><div><h2>{booking.status==='CONFIRMED'?'Your confirmed agreement':'Booking agreement'}</h2><p>{booking.description}</p></div>{booking.status==='CONFIRMED'&&<CircleCheck size={30}/>}</div>
         <TermsSummary booking={booking}/>
-        {open&&<p className="subtle">{canConfirm?'You can confirm the latest offer or make a counteroffer.':'Waiting for the other party to confirm the latest terms.'}</p>}
+        {open&&<div className="offer-state"><strong>{canConfirm?'Your response is needed':'Awaiting response'}</strong><p>{canConfirm?'Accept the latest terms or send a counteroffer.':'The other party needs to accept the latest terms.'}</p></div>}
         {booking.status==='CONFIRMED'&&<p className="match"><Check size={16}/> This slot is reserved for {booking.workerName}.</p>}
         <div className="actions">
           {canConfirm&&<button disabled={task.pending} className="btn primary" onClick={()=>action('confirm')}><Check size={18}/> Confirm agreement</button>}
           {open&&!proposal&&<button className="btn outline" onClick={()=>setProposal(true)}>Propose new terms</button>}
-          {booking.status==='CONFIRMED'&&user.role==='customer'&&<button className="btn primary" disabled={task.pending} onClick={()=>action('complete')}><Check size={18}/> Confirm job completed</button>}
-          {open&&user.role==='worker'&&<button className="btn quiet" disabled={task.pending} onClick={()=>action('reject')}>Decline request</button>}
-          {canChat&&<button className="btn quiet" disabled={task.pending} onClick={()=>action('cancel')}>Cancel booking</button>}
+          {open&&user.role==='worker'&&<button className="btn quiet" disabled={task.pending} onClick={()=>setCloseAction('reject')}>Decline request</button>}
+          {canChat&&<button className="btn quiet" disabled={task.pending} onClick={()=>setCloseAction('cancel')}>Cancel booking</button>}
         </div>
-        {proposal&&open&&<Proposal booking={booking} pending={task.pending} onCancel={()=>setProposal(false)} onSave={form=>{
+        {proposal&&open&&<Proposal key={booking.version} booking={booking} pending={task.pending} onCancel={()=>setProposal(false)} onSave={form=>{
           try{action('propose',{terms:{description:form.description,location:form.location,price:Number(form.price),...slotBody(form.start,form.end)}});}
           catch(e){task.setError(e.message);}
         }}/>}
       </section>
-      <section className="panel chat"><h2>Job conversation</h2><p>Use a quick reply, type, or dictate your message.</p>
-        <div className="messages" aria-live="polite">{messages.length?messages.map(m=><div key={m.id} className={'message '+(m.senderId===user.id?'mine':'')}><small>{m.senderName}</small><span dir="auto">{m.body}</span></div>):<p className="subtle">No messages yet.</p>}</div>
-        {canChat&&<><div className="chips clickable">{presets.map((m,i)=><button type="button" key={m} disabled={task.pending} onClick={()=>send({preset:i})}>{m}</button>)}</div>
-          <form onSubmit={e=>{e.preventDefault();send({body:message});}}><VoiceInput compact text={message} onChange={setMessage} label="Your message" placeholder="Write or dictate a reply"/><button className="btn primary" disabled={task.pending||!message.trim()}>Send message <ArrowRight size={16}/></button></form></>}
-      </section>
-    </div>
-    {(canReview||canPhoto||booking.reviewed||booking.hasEvidence)&&<section className="panel dashboard-summary evidence"><div className="eyebrow"><Star size={16}/> 05 / KAAM KA SABOOT</div><h2>Work evidence &amp; customer feedback</h2>
-      <p>Evidence and feedback come from this booking and are separate from identity verification.</p>
-      {booking.hasEvidence&&<WorkPhoto key={booking.version+'-'+notice} id={id} completed={booking.status==='COMPLETED'} userId={user.id}/>}
-      {canPhoto&&<label className="upload"><ImagePlus size={19}/> {booking.hasEvidence?'Replace work photo':'Add work photo'} <input aria-label="Work photo" type="file" accept="image/jpeg,image/png,image/webp" disabled={task.pending} onChange={e=>{
-        const file=e.target.files?.[0];e.target.value='';if(!file)return;
-        task.run(async()=>{
-          if(file.size>1000000)throw new Error('Choose an image under 1 MB.');
-          const base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('Unable to read photo.'));reader.readAsDataURL(file);});
-          await api(path+'/evidence','PUT',{mime:file.type,base64});await load();setNotice('Work photo saved.');
-        });
-      }}/></label>}
+    {(confirmed||completed||Boolean(booking.addons?.length))&&<div className="booking-side">
+      {(confirmed||Boolean(booking.addons?.length))&&<ExtraWork booking={booking} role={user.role} busy={task.pending} onPropose={proposeExtra} onDecide={decideExtra}/>}
+    {(confirmed||completed)&&<section className="panel evidence">
+      <div className="eyebrow"><Star size={16}/> 05 / KAAM KA SABOOT</div>
+      <h2>{completed?'Work evidence & customer feedback':'Finish the job'}</h2>
+      <p>{confirmed?(user.role==='worker'?'Share a photo of the completed work. The customer confirms when the job is done.':'Check the work, then confirm completion to unlock the review.'): 'Evidence and feedback come from this booking.'}</p>
+      {Boolean(booking.hasEvidence)?<WorkPhoto key={photoRevision+'-'+booking.version} id={id} completed={completed} userId={user.id}/>:<p className="empty">No work photo has been uploaded.</p>}
+      {canPhoto&&<PhotoUpload hasEvidence={Boolean(booking.hasEvidence)} pending={task.pending} onUpload={uploadPhoto}/>}
+      {confirmed&&user.role==='customer'&&<>{pendingExtra&&<p className="callout">Decide on the pending extra work above before completing this job.</p>}<button className="btn primary completion-action" disabled={task.pending||pendingExtra} onClick={()=>action('complete')}><Check size={18}/> Confirm job completed</button></>}
       {canReview&&<form onSubmit={e=>{e.preventDefault();task.run(async()=>{await api('/reviews','POST',{bookingId:Number(id),rating,feedback});await load();setNotice('Review saved and worker rating updated.');});}}>
         <fieldset className="star-picker"><legend>Rate the work</legend>{[1,2,3,4,5].map(n=><button type="button" key={n} aria-label={n+' stars'} aria-pressed={rating===n} onClick={()=>setRating(n)}><Star fill={rating>=n?'currentColor':'none'} size={25}/></button>)}</fieldset>
         <Field label="Short feedback · optional"><textarea rows={3} maxLength={350} dir="auto" value={feedback} onChange={e=>setFeedback(e.target.value)}/></Field>
         <button className="btn primary" disabled={task.pending||!rating}>Submit review</button>
       </form>}
       {Boolean(booking.reviewed)&&<Link className="text-link" to={'/workers/'+booking.workerId}>See customer feedback on the profile <ArrowRight size={17}/></Link>}
-    </section>}
+    </section>}</div>}
+      {closed?<section className="panel booking-closed"><div className="eyebrow"><X size={16}/> CLOSED</div>
+        <h2>{booking.status==='REJECTED'?'The worker declined this request.':'This booking has been cancelled.'}</h2>
+        <p>The agreement is kept in your booking history.</p>
+        {Boolean(messages.length)&&<details className="closed-history"><summary>View conversation history</summary>{conversation}</details>}
+        {user.role==='customer'&&<Link className="btn primary" to={'/find?requestId='+booking.requestId}>Find another worker <ArrowRight size={17}/></Link>}
+      </section>:<section className="panel chat">
+        <div className="chat-heading"><div className="eyebrow"><MessageCircle size={16}/> PAKKI BAAT</div><h2>Job conversation</h2><p>{canChat?'Send a message or tap a quick reply.':'Conversation history'}</p></div>
+        {conversation}
+        {canChat&&<div className="chat-compose"><strong>Quick replies</strong>
+          <div className="chips clickable">{presets.map((m,i)=><button type="button" key={m} disabled={task.pending} onClick={()=>send({preset:i})}>{m}</button>)}</div>
+          <form onSubmit={e=>{e.preventDefault();send({body:message});}}><VoiceInput compact text={message} onChange={setMessage} label="Your message" placeholder="Write or dictate a reply"/><button className="btn primary" disabled={task.pending||!message.trim()}>Send message <ArrowRight size={16}/></button></form>
+        </div>}
+      </section>}
+    </div>
   </div>;
 }
