@@ -74,8 +74,8 @@ export default function Discovery() {
     nav('/bookings/'+booked.id);
   }
   return <div className="container page">
-    <Intro eyebrow="02 / KAAM SAMJHO" title={lang==='ur'?'آپ کو کیا کام کروانا ہے؟':'What do you need fixed?'} description="Describe the problem. We’ll identify the trade and check local workers against the time you need." icon={Sparkles}/>
-    <div className="discover-layout"><section className="panel"><h2>Describe the job</h2>
+    <div className="discover-layout job-intake"><Intro eyebrow="02 / KAAM SAMJHO" title={lang==='ur'?'آپ کو کیا کام کروانا ہے؟':<>What needs<br/>fixing today?</>} description="Describe the problem. We’ll identify the trade and check local workers against the time you need." icon={Sparkles}/>
+    <section className="panel job-capture"><h2>Describe the job</h2>
       <form onSubmit={e=>{e.preventDefault();task.run(async()=>{
         const result=await api('/ai/understand-job','POST',{text});
         setJob({...empty,...Object.fromEntries(Object.entries(result.data).filter(([,v])=>v!==null))});
@@ -89,7 +89,7 @@ export default function Discovery() {
       </form>
       {user.role!=='customer'&&<button className="btn outline wide" onClick={()=>choose(1)}>Switch to customer demo</button>}
     </section>
-    <section className="panel"><h2>Job summary</h2><p>{source||'Fill in the details below, or start with your own words.'}</p>
+    <section className="panel job-summary"><h2>Job summary</h2><p>{source||'Fill in the details below, or start with your own words.'}</p>
       {source&&(!job.city||!job.locality)&&<p className="callout"><MapPin size={16}/> Where is the job? Choose a city and neighbourhood.</p>}
       <Field label="Problem identified"><input maxLength={500} dir="auto" value={job.problem} onChange={e=>set('problem',e.target.value)} placeholder="e.g. Kitchen pipe leakage"/></Field>
       <div className="fields"><Field label="Required trade"><Options values={trades} value={job.trade} placeholder="Any trade" onChange={e=>{setSelected(null);set('trade',e.target.value);}}/></Field>
@@ -99,7 +99,7 @@ export default function Discovery() {
       <SlotFields start={time.start} end={time.end} onStart={start=>setTime(t=>({...t,start}))} onEnd={end=>setTime(t=>({...t,end}))}/>
     </section></div>
     <ErrorNote error={task.error}/>
-    <section className="section results"><div className="section-head"><div><div className="eyebrow"><Search size={15}/> SMART DISCOVERY</div><h2 aria-live="polite">{results}</h2></div><button type="button" className="btn quiet" onClick={()=>setRefresh(r=>r+1)}>Refresh availability</button></div>
+    <section className="section results"><div className="section-head"><div><div className="eyebrow"><Search size={15}/> SMART DISCOVERY</div><h2>Good people. Right nearby.</h2><p aria-live="polite">{results}</p></div><button type="button" className="btn quiet" onClick={()=>setRefresh(r=>r+1)}>Refresh availability</button></div>
       <div className="filterbar"><label className="check"><input type="checkbox" checked={onlyFree} onChange={e=>setOnlyFree(e.target.checked)}/> Free for this slot</label>
       <Options aria-label="Minimum rating" placeholder="Any rating" values={['4','4.5','5']} labels={{4:'4+ stars',4.5:'4.5+ stars',5:'5 stars'}} value={minRating} onChange={e=>setMinRating(e.target.value)}/>
       <Options aria-label="Minimum experience" placeholder="Any experience" values={['5','10','15']} labels={{5:'5+ years',10:'10+ years',15:'15+ years'}} value={minExperience} onChange={e=>setMinExperience(e.target.value)}/>

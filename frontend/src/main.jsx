@@ -8,7 +8,9 @@ import Onboard from './Onboard';
 import Worker from './Worker';
 import { Booking, Dashboard } from './Bookings';
 import { makeApi, Session } from './ui';
+import '@fontsource-variable/manrope';
 import './style.css';
+import './figma.css';
 
 const navLabels={en:['Find workers','Worker hub','Dashboard'],ur:['کاریگر ڈھونڈیں','کاریگر کا صفحہ','ڈیش بورڈ'],roman:['Karigar dhoondein','Kaam ka markaz','Mera dashboard']};
 function Brand() {

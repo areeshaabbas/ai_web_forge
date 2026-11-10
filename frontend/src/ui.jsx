@@ -77,6 +77,13 @@ export function Listen({text,language='ur-PK',label='Listen'}) {
     message.voice=voice; message.lang=language; speech.speak(message);
   }}><Volume2 size={17}/> {label}</button>{notice&&<small className="voice-note" role="status">{notice}</small>}</span>;
 }
+const waveform=[5,12,8,20,14,29,19,36,25,14,31,42,23,33,16,26,36,21,11,24,17,8,13,5];
+export function VoiceSignal({children,listening=false}) {
+  return <div className={'voice-signal'+(listening?' is-listening':'')}>
+    <div className="signal-rings">{children}</div>
+    <div className="signal-wave" aria-hidden="true">{waveform.map((height,index)=><i key={index} style={{height}}/>)}</div>
+  </div>;
+}
 export function VoiceInput({text,onChange,example,label='Describe in your own words',placeholder='Urdu, Roman Urdu, or English…',onSample,compact=false}) {
   const recognition=useRef(null);
   const [listening,setListening]=useState(false);
@@ -97,7 +104,10 @@ export function VoiceInput({text,onChange,example,label='Describe in your own wo
     instance.onerror=event=>setNote(event.error==='not-allowed'?'Microphone access was denied. Allow it in your browser or type below.':'Speech could not be captured. Try again or type below.');
     try { instance.start(); } catch {setNote('The microphone is busy or unavailable.');}
   }
-  return <div className={'voice-box '+(compact?'compact':'')}><div className="voice-top"><button type="button" className={'mic '+(listening?'listening':'')} disabled={!supported} onClick={toggle} aria-label={listening?'Stop microphone':'Start microphone'}>{listening?<Square/>:<Mic/>}</button><div><strong>{listening?'Listening…':'Tap to speak'}</strong><small>{supported?'Microphone permission is required.':'Speech input is unavailable here. You can type below.'}</small></div><select className="voice-select" aria-label="Speech language" value={speechLang} onChange={e=>setSpeechLang(e.target.value)} disabled={listening}><option value="ur-PK">اردو</option><option value="en-PK">English</option></select></div>
+  const mic=<button type="button" className={'mic '+(listening?'listening':'')} disabled={!supported} onClick={toggle} aria-label={listening?'Stop microphone':'Start microphone'}>{listening?<Square/>:<Mic/>}</button>;
+  return <div className={'voice-box '+(compact?'compact':'capture')}>
+    {!compact&&<VoiceSignal listening={listening}>{mic}</VoiceSignal>}
+    <div className="voice-top">{compact&&mic}<div><strong aria-live="polite">{listening?'Listening…':'Tap to speak'}</strong><small>{supported?'Microphone permission is required.':'Speech input is unavailable here. You can type below.'}</small></div><select className="voice-select" aria-label="Speech language" value={speechLang} onChange={e=>setSpeechLang(e.target.value)} disabled={listening}><option value="ur-PK">اردو</option><option value="en-PK">English</option></select></div>
     <ErrorNote error={note}/><Field label={label}><textarea dir="auto" rows={compact?2:4} maxLength={compact?500:2000} placeholder={placeholder} value={text} onChange={e=>onChange(e.target.value)}/></Field>
     {example&&<button className="btn quiet mini" type="button" onClick={()=>onSample?onSample(example):onChange(example)}><AudioLines size={16}/> Use example</button>}
   </div>;

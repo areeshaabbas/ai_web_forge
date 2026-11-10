@@ -40,7 +40,7 @@ export function Dashboard() {
     ['Confirmed bookings',bookings?.filter(b=>b.status==='CONFIRMED')],
     ['Booking history',bookings?.filter(b=>['COMPLETED','REJECTED','CANCELLED'].includes(b.status))]
   ];
-  return <div className="container page"><Intro eyebrow={isWorker?'WORKER HUB':'CUSTOMER HUB'} title={isWorker?'Your work, at a glance.':'Your bookings, at a glance.'} description={'Signed in as '+user.name+' · fictional demo account'} icon={BriefcaseBusiness}/>
+  return <div className="container page hub-screen"><Intro eyebrow={isWorker?'WORKER HUB':'CUSTOMER HUB'} title={'Salam, '+user.name.split(' ')[0]+'.'} description={'Signed in as '+user.name+' · fictional demo account'} icon={BriefcaseBusiness}/>
     <div className="dashboard-actions">
       {isWorker?<Link className="btn primary" to="/onboard">{worker?'Edit my profile':'Create Bolo Profile'} <ArrowRight size={17}/></Link>:<Link className="btn primary" to="/find">New service request <ArrowRight size={17}/></Link>}
       <button className="btn outline" type="button" disabled={task.pending} onClick={()=>task.run(load)}><RefreshCw size={17}/> Refresh</button>
@@ -125,7 +125,7 @@ export function Booking() {
   const actorId=user.role==='worker'?booking.customerId:booking.workerId;
   return <div className="container page">
     <Link className="text-link" to="/dashboard">← Back to dashboard</Link>
-    <Intro eyebrow="03–04 / PAKKI BAAT" title={booking.status==='CONFIRMED'?'Pakki baat. Booking confirmed.':booking.description} description={booking.workerName+' with '+booking.customerName+' · Booking #'+booking.id} icon={MessageCircle}/>
+    <Intro eyebrow="03–04 / PAKKI BAAT" title={booking.status==='CONFIRMED'?<>One less thing<br/>to worry about.</>:booking.status==='COMPLETED'?'How did the job go?':<>A fair price.<br/>A clear plan.</>} description={booking.description+' · '+booking.workerName+' with '+booking.customerName+' · Booking #'+booking.id} icon={MessageCircle}/>
     <div className="dashboard-actions"><Status status={booking.status}/><button className="btn quiet mini" disabled={task.pending} onClick={()=>task.run(load)}><RefreshCw size={16}/> Refresh</button><button className="btn outline mini" onClick={()=>choose(actorId)}>Switch to {user.role==='worker'?'customer':'worker'} view <ArrowRight size={16}/></button></div>
     <ErrorNote error={task.error}/>{notice&&<p className="callout" role="status"><Check size={16}/> {notice}</p>}
     <div className="discover-layout booking-layout">

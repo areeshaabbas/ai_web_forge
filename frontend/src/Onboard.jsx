@@ -25,12 +25,12 @@ export default function Onboard() {
   const toggleSkill=skill=>change('skills',(selected.includes(skill)?selected.filter(x=>x!==skill):[...selected,skill]).join(', '));
   const ur=lang==='ur';
   if (user.role!=='worker') return <div className="container page"><Intro eyebrow="BOLO PROFILE" title="Start as a worker"/><Link to="/onboard" className="btn primary" onClick={()=>choose(2)}>Switch to worker demo</Link></div>;
-  return <div className="container page narrow">
-    <Intro eyebrow="01 / BOLO PROFILE" title={ur?'اپنا ہنر بتائیں':'Your skills, in your own words.'} description="Speak in Urdu or type naturally. Review what we understood and turn it into a profile." icon={Mic}/>
+  return <div className={'container page onboarding-screen stage-'+step}>
+    <div className="onboard-intro"><Intro eyebrow="01 / BOLO PROFILE" title={ur?'اپنا ہنر بتائیں':task.pending?(step===1?'Making your skills shine.':'Saving your profile.'):step===1?<>Your skill.<br/>Your own words.</>:step===2?<>Meet your<br/>new beginning.</>:'Your profile is ready.'} description="Speak in Urdu or type naturally. Review what we understood and turn it into a profile." icon={Mic}/>
     <div className="steps">{['Tell us','Review profile','Live profile'].map((label,i)=><div key={label} className={step>=i+1?'active':''}><span>{step>i+1?<Check size={15}/>:i+1}</span>{label}</div>)}</div>
-    <ErrorNote error={task.error}/>
+    <ErrorNote error={task.error}/></div>
     {!ready&&<p role="status">Loading profile…</p>}
-    {ready&&step===1&&<section className="panel"><div className="section-head"><div><h2>{ur?'اپنے کام کے بارے میں بتائیں':'What kind of work do you do?'}</h2><p>Tell us your name, trade, experience, and where you work.</p></div><Listen text="اپنا نام، ہنر، تجربہ اور علاقہ بتائیں۔" label="اردو میں سنیں"/></div>
+    {ready&&step===1&&<section className="panel onboard-capture"><div className="section-head"><div><h2>{ur?'اپنے کام کے بارے میں بتائیں':'What kind of work do you do?'}</h2><p>Tell us your name, trade, experience, and where you work.</p></div><Listen text="اپنا نام، ہنر، تجربہ اور علاقہ بتائیں۔" label="اردو میں سنیں"/></div>
       <form onSubmit={e=>{e.preventDefault();task.run(async()=>{
         const result=await api('/ai/worker-profile','POST',{text});
         const d=result.data;
